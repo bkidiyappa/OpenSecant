@@ -1,0 +1,4 @@
+@smoke @demo
+
+@reuse sample.test
+click on continue
