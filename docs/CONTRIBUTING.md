@@ -4,6 +4,8 @@ Thank you for helping improve OpenSecant.
 
 ## Development setup
 
+See [System requirements](SYSTEM_REQUIREMENTS.md) first. For local LLMs via Ollama, a **6+ GB GPU** is required.
+
 ```bash
 npm install
 npx playwright install chromium

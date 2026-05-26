@@ -13,6 +13,17 @@ Write tests as plain English. OpenSecant resolves each step through a persistent
 - **QA agent** — autonomous exploration and test generation from goals
 - **Multi-provider LLM** — Bedrock, OpenAI, Ollama, Azure OpenAI
 
+## System requirements
+
+| | |
+|--|--|
+| **Node.js** | 18+ |
+| **Playwright** | `npx playwright install chromium` (or your chosen browser) |
+| **Cloud LLM** | API credentials for OpenAI, Azure OpenAI, or AWS Bedrock |
+| **Local LLM (Ollama)** | **[6+ GB GPU VRAM required](docs/SYSTEM_REQUIREMENTS.md#local-llms-ollama)** — plus [Ollama](https://ollama.com) installed |
+
+Full details: [System requirements](docs/SYSTEM_REQUIREMENTS.md).
+
 ## Quick start
 
 ```bash
@@ -105,6 +116,7 @@ docs/           Architecture and guides
 
 ## Documentation
 
+- [System requirements](docs/SYSTEM_REQUIREMENTS.md) — Node, Playwright, GPU for local LLMs
 - [Writing tests](docs/WRITING_TESTS.md) — `@reuse`, `{{env.*}}`, utility keywords
 - [Architecture](docs/ARCHITECTURE.md)
 - [Action library patterns](docs/ACTION_LIBRARY.md)

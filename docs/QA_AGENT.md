@@ -50,6 +50,7 @@ Planner and code generation use separate LLM calls for reliability.
 - Playwright browsers installed (`npx playwright install`)
 - LLM provider configured when steps cannot be resolved deterministically
 - Set `AI_HEALING_ENABLED=true` and provider credentials (see `.env.example`)
+- **Local LLM (Ollama):** a **6+ GB GPU** is required — see [System requirements](SYSTEM_REQUIREMENTS.md#local-llms-ollama)
 
 ## Output
 

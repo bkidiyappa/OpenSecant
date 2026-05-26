@@ -142,6 +142,10 @@ The planner and code generator use **separate LLM calls**:
 3. Add config in `src/ai/llm/llmConfig.js`
 4. Set `LLM_PROVIDER=your-provider` environment variable
 
+## System requirements
+
+Node.js 18+, Playwright browsers, and an LLM provider for healing/agent features. **Local LLMs (Ollama) require a 6+ GB GPU.** See [System requirements](SYSTEM_REQUIREMENTS.md).
+
 ## NPM Scripts
 
 | Script | Command |
