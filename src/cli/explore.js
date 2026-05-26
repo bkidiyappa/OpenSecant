@@ -32,15 +32,16 @@ async function runExploreMode(argv) {
   const stepsIdx = argv.indexOf('--explore-max-steps');
   const maxStepsPerFlow = (stepsIdx !== -1 && argv[stepsIdx + 1]) ? parseInt(argv[stepsIdx + 1], 10) : 30;
 
-  const manifest = await exploreSite(siteUrl, { maxPages });
+  const manifest = await exploreSite(siteUrl, { maxPages, useLlm: true });
   const manifestPath = saveManifest(manifest, exploreName);
   logger.info(`Manifest saved: ${manifestPath}`);
 
   if (manifest.flows.length === 0) {
-    logger.warning('No testable flows discovered.');
+    logger.warning('No testable flows discovered after crawl and LLM analysis.');
     return 1;
   }
 
+  logger.info(`Running ${manifest.flows.length} flow(s) with QA agent to generate tests...`);
   const flowResults = await runFlows(manifest, { maxStepsPerFlow, exploreName });
   const reportPath = generateExplorationReport(manifest, flowResults, { exploreName });
   logger.info(`Exploration report: ${reportPath}`);

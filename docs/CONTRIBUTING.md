@@ -18,6 +18,8 @@ npm run smoke
 npm test
 ```
 
+When adding or changing tests, see [Writing tests](WRITING_TESTS.md) for `@reuse` and `{{keyword}}` / `{{env.*}}` placeholders.
+
 ## Code guidelines
 
 - Match existing module layout under `src/engines`, `src/runner`, and `src/providers`

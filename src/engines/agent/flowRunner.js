@@ -22,22 +22,28 @@ const { getStepStore } = require('../../store/stepStore');
  * @returns {string} Goal string for runAgent
  */
 function buildGoalFromFlow(flow, siteUrl) {
+  if (flow.goal) {
+    const entryHints = flow.entryPath?.length
+      ? flow.entryPath.map((e) => e.action).join(', then ')
+      : '';
+    return entryHints ? `${flow.goal} (start by: ${entryHints})` : flow.goal;
+  }
+
   const parts = [`On ${siteUrl}`];
 
-  // Describe the flow
   if (flow.type === 'multi-step-form' || flow.type === 'form') {
     parts.push(`fill the ${flow.name} form`);
+  } else if (flow.type === 'agent-explore') {
+    parts.push(`explore the site and record main user journeys`);
   } else {
     parts.push(`complete the ${flow.name} flow`);
   }
 
-  // Add entry path hints
   if (flow.entryPath && flow.entryPath.length > 0) {
-    const entryHints = flow.entryPath.map(e => e.action).join(', then ');
+    const entryHints = flow.entryPath.map((e) => e.action).join(', then ');
     parts.push(`(start by: ${entryHints})`);
   }
 
-  // Add submit hint
   if (flow.submitText) {
     parts.push(`and click ${flow.submitText} to submit`);
   }

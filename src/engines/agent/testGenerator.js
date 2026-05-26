@@ -10,7 +10,8 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('../../utils/logger');
 
-const TESTS_DIR = path.join(__dirname, '../../../tests/smoke');
+const { paths: frameworkPaths } = require('../../config/frameworkConfig');
+const TESTS_DIR = path.join(frameworkPaths.tests, 'ai');
 
 /**
  * Generate a .test file from recorded agent steps.
@@ -21,7 +22,7 @@ const TESTS_DIR = path.join(__dirname, '../../../tests/smoke');
  * @returns {string} Path to the generated .test file
  */
 function generateTestFile(testName, recordedSteps, options = {}) {
-  const tags = options.tags || ['@smoke', '@agent-generated'];
+  const tags = options.tags || ['@ai', '@agent-generated'];
   const outputDir = options.outputDir || TESTS_DIR;
 
   // Sanitize test name for filename

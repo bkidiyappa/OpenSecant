@@ -16,9 +16,15 @@
 
 const logger = require('../../utils/logger');
 const { launchBrowser, getDefaultContextOptions } = require('../../runner/browserLauncher');
+const { discoverFlowsWithLLM } = require('./flowDiscovery');
 
 const MAX_PAGES = 20;
-const PAGE_TIMEOUT = 15000;
+const PAGE_TIMEOUT = 25000;
+const CTA_LINK_RE = /contact|demo|request|schedule|book|quote|sign|login|support|solution|product|pricing|trial|get started|learn more|about/i;
+
+function verboseExplorer() {
+  return process.env.OPENSECANT_VERBOSE === 'true';
+}
 
 /**
  * Extract the origin (scheme + host) from a URL.
@@ -30,6 +36,20 @@ function getOrigin(url) {
   } catch (_) {
     return null;
   }
+}
+
+/** Hostname without www — treats lytx.com and www.lytx.com as same site. */
+function getSiteKey(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./i, '').toLowerCase();
+  } catch (_) {
+    return null;
+  }
+}
+
+function isSameSite(url, siteKey) {
+  if (!url || !siteKey) return false;
+  return getSiteKey(url) === siteKey;
 }
 
 /**
@@ -49,12 +69,17 @@ function normalizeUrl(url) {
 /**
  * Check if a URL is worth visiting (internal, not a file download, etc.)
  */
-function isNavigableUrl(url, origin) {
-  if (!url || !url.startsWith(origin)) return false;
-  // Skip common non-page URLs
+function isNavigableUrl(url, siteKey) {
+  if (!isSameSite(url, siteKey)) return false;
   if (/\.(pdf|jpg|jpeg|png|gif|svg|css|js|ico|woff|woff2|ttf|eot|mp4|mp3|zip|doc|xlsx?)$/i.test(url)) return false;
   if (/^(mailto:|tel:|javascript:|#)/i.test(url)) return false;
   return true;
+}
+
+function linkPriority(link) {
+  if (CTA_LINK_RE.test(link.text || '')) return 0;
+  if (link.text && link.text.length < 40) return 1;
+  return 2;
 }
 
 /**
@@ -208,7 +233,7 @@ function identifyFlows(siteMap, startUrl) {
 
   // Strategy 1: Pages with forms are testable flows
   for (const [url, info] of Object.entries(siteMap)) {
-    if (info.type === 'form' || info.type === 'wizard') {
+    if (info.type === 'form' || info.type === 'wizard' || info.type === 'form-light') {
       const formInfo = info.forms[0] || {};
       const fields = formInfo.fields || info.standaloneFields || [];
       const submitText = formInfo.submitText || '';
@@ -224,6 +249,7 @@ function identifyFlows(siteMap, startUrl) {
         type: info.type === 'wizard' ? 'multi-step-form' : 'form',
         url,
         entryPath,
+        goal: `On ${startUrl} complete the ${name} form and submit`,
         fields: fields.map(f => ({
           name: f.name || f.label,
           type: f.type,
@@ -232,24 +258,36 @@ function identifyFlows(siteMap, startUrl) {
         })),
         submitText,
         fieldCount: fields.length,
-        priority: fields.length >= 5 ? 'high' : fields.length >= 2 ? 'medium' : 'low'
+        priority: fields.length >= 5 ? 'high' : fields.length >= 2 ? 'medium' : 'low',
+        source: 'heuristic',
       });
     }
   }
 
-  // Strategy 2: Pages reachable via CTA-like links (Schedule, Book, Estimate, Contact)
-  for (const [url, info] of Object.entries(siteMap)) {
-    if (info.type === 'content' || info.type === 'landing' || info.type === 'listing') {
-      for (const link of [...(info.navLinks || []), ...(info.links || [])]) {
-        if (/schedule|book|estimate|contact|appointment|request|sign.?up|register|quote/i.test(link.text)) {
-          const targetUrl = normalizeUrl(link.href);
-          // Only add if the target is a form page we already found
-          const existingFlow = flows.find(f => normalizeUrl(f.url) === targetUrl);
-          if (existingFlow && existingFlow.entryPath.length === 0) {
-            existingFlow.entryPath = [{ action: `click on ${link.text} link`, fromUrl: url }];
-          }
+  // Strategy 2: CTA / nav journeys (even if target page not fully classified as form)
+  const seenUrls = new Set(flows.map((f) => normalizeUrl(f.url)));
+  for (const [fromUrl, info] of Object.entries(siteMap)) {
+    for (const link of [...(info.navLinks || []), ...(info.links || [])]) {
+      if (!CTA_LINK_RE.test(link.text || '')) continue;
+      const targetNorm = normalizeUrl(link.href);
+      if (seenUrls.has(targetNorm)) {
+        const existing = flows.find((f) => normalizeUrl(f.url) === targetNorm);
+        if (existing && existing.entryPath.length === 0) {
+          existing.entryPath = [{ action: `click on ${link.text} link`, fromUrl }];
         }
+        continue;
       }
+      seenUrls.add(targetNorm);
+      flows.push({
+        name: sanitizeFlowName(link.text),
+        type: 'navigation',
+        url: link.href,
+        entryPath: [{ action: `click on ${link.text} link`, fromUrl }],
+        goal: `On ${startUrl} open ${link.text} and verify the page loads with expected content`,
+        fieldCount: 0,
+        priority: 'medium',
+        source: 'heuristic',
+      });
     }
   }
 
@@ -282,7 +320,44 @@ function identifyFlows(siteMap, startUrl) {
   const priorityOrder = { high: 0, medium: 1, low: 2 };
   flows.sort((a, b) => (priorityOrder[a.priority] || 2) - (priorityOrder[b.priority] || 2));
 
-  return flows;
+  return flows.slice(0, 15);
+}
+
+/**
+ * Merge heuristic + LLM flows; ensure at least one agent exploration flow.
+ */
+async function resolveFlows(siteMap, startUrl, useLlm) {
+  let flows = identifyFlows(siteMap, startUrl);
+  logger.info(`[Explorer] Heuristic flows: ${flows.length}`);
+
+  if (useLlm && Object.keys(siteMap).length > 0) {
+    const llmFlows = await discoverFlowsWithLLM(siteMap, startUrl);
+    const seen = new Set(flows.map((f) => normalizeUrl(f.url)));
+    for (const f of llmFlows) {
+      const key = normalizeUrl(f.url);
+      if (!seen.has(key)) {
+        seen.add(key);
+        flows.push(f);
+      }
+    }
+    logger.info(`[Explorer] After LLM merge: ${flows.length} flow(s)`);
+  }
+
+  if (flows.length === 0) {
+    flows = [{
+      name: 'site-exploration',
+      type: 'agent-explore',
+      url: startUrl,
+      entryPath: [],
+      goal: `Explore ${startUrl}: visit main navigation, product/solution pages, and contact or demo flows. Build a smoke test from successful steps.`,
+      priority: 'high',
+      fieldCount: 0,
+      source: 'fallback',
+    }];
+    logger.info('[Explorer] Using fallback agent-explore flow');
+  }
+
+  return flows.slice(0, 15);
 }
 
 /**
@@ -304,9 +379,10 @@ function sanitizeFlowName(name) {
  */
 async function exploreSite(startUrl, options = {}) {
   const maxPages = options.maxPages || MAX_PAGES;
-  const origin = getOrigin(startUrl);
+  const useLlm = options.useLlm !== false;
+  let siteKey = getSiteKey(startUrl);
 
-  if (!origin) {
+  if (!siteKey) {
     logger.error('[Explorer] Invalid start URL');
     return { site: startUrl, flows: [], siteMap: {}, error: 'Invalid URL' };
   }
@@ -353,19 +429,30 @@ async function exploreSite(startUrl, options = {}) {
         };
 
         // Discover new URLs to visit
+        // After first load, align site key with redirect target (e.g. lytx.com → www.lytx.com)
+        const liveKey = getSiteKey(page.url());
+        if (liveKey) siteKey = liveKey;
+
         const allLinks = [...(pageInfo.navLinks || []), ...(pageInfo.links || [])];
-        for (const link of allLinks) {
+        const sortedLinks = allLinks
+          .filter((link) => isNavigableUrl(link.href, siteKey))
+          .sort((a, b) => linkPriority(a) - linkPriority(b));
+
+        for (const link of sortedLinks) {
           const linkNorm = normalizeUrl(link.href);
-          if (!visited.has(linkNorm) && isNavigableUrl(link.href, origin)) {
-            // Don't add too many from the same page
-            const alreadyQueued = toVisit.some(t => normalizeUrl(t.url) === linkNorm);
+          if (!visited.has(linkNorm)) {
+            const alreadyQueued = toVisit.some((t) => normalizeUrl(t.url) === linkNorm);
             if (!alreadyQueued) {
               toVisit.push({
                 url: link.href,
-                entryPath: [...entryPath, { action: `click on ${link.text} link`, fromUrl: currentUrl }]
+                entryPath: [...entryPath, { action: `click on ${link.text} link`, fromUrl: currentUrl }],
               });
             }
           }
+        }
+
+        if (verboseExplorer()) {
+          logger.info(`[Explorer]   Queued ${toVisit.length} URLs (site: ${siteKey})`);
         }
 
       } catch (err) {
@@ -384,15 +471,15 @@ async function exploreSite(startUrl, options = {}) {
     await browser.close();
   }
 
-  // Identify testable flows
-  const flows = identifyFlows(siteMap, startUrl);
+  const flows = await resolveFlows(siteMap, startUrl, useLlm);
+  const origin = getOrigin(startUrl) || `https://${siteKey}`;
 
   logger.info(`\n${'═'.repeat(60)}`);
   logger.info(`SITE EXPLORER FINISHED`);
   logger.info(`Pages visited: ${visited.size}`);
   logger.info(`Flows discovered: ${flows.length}`);
   for (const f of flows) {
-    logger.info(`  - [${f.priority}] ${f.name} (${f.type}, ${f.fieldCount} fields) → ${f.url}`);
+    logger.info(`  - [${f.priority}] ${f.name} (${f.type}) → ${f.url}`);
   }
   logger.info(`${'═'.repeat(60)}\n`);
 

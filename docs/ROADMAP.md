@@ -10,11 +10,9 @@
 
 ## Next
 
-- [ ] VS Code extension for step authoring and replay
-- [ ] CI GitHub Action template
-- [ ] Visual regression hooks in reporting
-- [ ] Improved Azure OpenAI deployment configuration UX
-- [ ] Plugin API for custom action patterns
+- [ ] Multi Agent Support
+- [ ] Extend Framework for API Automation
+- [ ] Extend Framework for Native Mobile App Automation
 
 ## Future
 

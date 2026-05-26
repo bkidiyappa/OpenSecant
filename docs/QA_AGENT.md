@@ -19,10 +19,15 @@ Options:
 ### Site exploration
 
 ```bash
-npx opensecant --explore "https://example.com" --explore-name demo --explore-max-pages 20
+npx opensecant --explore "https://example.com" --explore-name demo --explore-max-pages 20 --explore-max-steps 40
 ```
 
-Discovers flows, executes them, and generates tests plus an exploration report under `reports/`.
+1. **Crawls** the site (handles `www` / non-`www`, prioritizes Contact/Demo/Product links)
+2. **Detects flows** with heuristics (forms, CTAs) and **LLM** when needed
+3. **Runs the QA agent** on each flow to generate `.test` files under `tests/ai/`
+4. Writes manifest + report under `reports/`
+
+If no forms are found, a fallback **agent-explore** flow still runs so tests are generated.
 
 ### Comprehensive QA
 

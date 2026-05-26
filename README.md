@@ -42,6 +42,17 @@ Click Login
 Verify Welcome message is visible
 ```
 
+Reuse shared flows with `@reuse`, and use `{{env.*}}` / `{{keyword}}` for config and dynamic data:
+
+```text
+@smoke
+@reuse shared/login.test
+Fill notes as Order {{unique}}
+Verify dashboard is displayed
+```
+
+See **[Writing tests](docs/WRITING_TESTS.md)** for `@reuse`, all utility keywords (`{{unique}}`, `{{random_email}}`, …), and preprocessing rules.
+
 Run:
 
 ```bash
@@ -60,7 +71,7 @@ npx opensecant --agent "On https://example.com complete the contact form" --agen
 npx opensecant --explore "https://example.com" --explore-name demo
 
 # Structured comprehensive QA (see examples/qa-agent/prompt.example.txt)
-npx opensecant --comprehensive-qa examples/qa-agent/prompt.example.txt
+npx opensecant --comprehensive-qa examples/qa-agent/promptExample.md
 ```
 
 ## Configuration
@@ -94,6 +105,7 @@ docs/           Architecture and guides
 
 ## Documentation
 
+- [Writing tests](docs/WRITING_TESTS.md) — `@reuse`, `{{env.*}}`, utility keywords
 - [Architecture](docs/ARCHITECTURE.md)
 - [Action library patterns](docs/ACTION_LIBRARY.md)
 - [QA agent](docs/QA_AGENT.md)

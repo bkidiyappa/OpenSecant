@@ -1,6 +1,6 @@
-# OpenSecant — Architecture
+# TestWizard — Architecture Guide
 
-## Project structure
+## Project Structure
 
 ```
 opensecant/
@@ -19,63 +19,136 @@ opensecant/
 │   ├── reporting/               # HTML + JSON reports
 │   ├── config/                  # env + framework config
 │   └── utils/
-├── tests/
-├── data/stepstore.json
-├── examples/
+│       ├── logger.js               # Colored console logging with timestamps
+│       └── uniqueStringGenerator.js # IST-based unique string generation
+│
+├── tests/                          # Test suites
+│   └── smoke/                      # Smoke tests (.test files)
+│
+├── data/
+│   └── stepstore.json              # Persistent step → code mappings
+│
+├── scripts/
+│   ├── cleanup-stepstore.js        # Remove orphaned stepstore entries
+│   ├── setup/
+│   │   ├── setup-bedrock-env.js    # AWS credentials setup helper
+│   │   └── run-parallel-smoke.js   # Standalone parallel smoke runner
+│   └── debug/
+│       └── debug-find-close-button.js
+│
+├── reports/                        # Test reports (gitignored)
+├── debug-prompts/                  # LLM prompt debug files (gitignored)
 └── docs/
+    ├── ARCHITECTURE.md             # This file
+    └── ACTION_LIBRARY.md           # Action library patterns and scoring
 ```
 
-## Execution flow
-
-1. **`src/index.js`** loads config, initializes logger and browser settings
-2. **`src/cli`** routes to test run or agent modes
-3. **`src/runner/testExecutor.js`** launches browser and iterates steps
-4. **`src/runner/stepPreprocessor.js`** expands `@reuse`, substitutes `{{env.*}}`
-5. **`src/runner/stepExecutor.js`** resolves each step
-
-## Step resolution
+## Module Dependency Graph
 
 ```
-Natural-language step
+runner.js
+  ├── src/core/runner/index.js          (CLI, test discovery)
+  │     ├── src/core/runner/testExecutor.js
+  │     │     ... (see below)
+  │     └── ...
   │
-  ├─ 1. StepStore (data/stepstore.json)
-  │
-  ├─ 2. Locator resolver (deterministic patterns + DOM scoring)
-  │
-  └─ 3. LLM engine (Bedrock/OpenAI/Ollama/Azure) with healing retries
+  └── src/core/agent/qaAgent.js         (--agent mode)
+        ├── src/core/agent/actionPlanner.js  (LLM decides next action)
+        ├── src/core/agent/testGenerator.js  (generates .test + report)
+        ├── src/ai/localengine/actionLibrary.js
+        ├── src/ai/localengine/codeGenerator.js
+        ├── src/ai/localengine/pageDataCapture.js
+        └── src/core/stepStore.js
+
+Test Runner dependency detail:
+  src/core/runner/index.js
+        ├── src/core/runner/testExecutor.js
+        │     ├── src/core/runner/stepPreprocessor.js  (, {{env}}, {{keyword}})
+        │     ├── src/core/runner/stepExecutor.js
+        │     │     ├── src/core/stepStore.js                (step → code cache)
+        │     │     ├── src/ai/localengine/actionLibrary.js  (deterministic patterns)
+        │     │     ├── src/ai/localengine/codeGenerator.js  (LLM fallback)
+        │     │     │     ├── src/ai/localengine/pageDataCapture.js
+        │     │     │     ├── src/ai/localengine/elementFiltering.js
+        │     │     │     └── src/ai/llm/*                   (provider abstraction)
+        │     │     └── src/ai/localengine/pageDataCapture.js
+        │     ├── src/core/runner/performanceOptimizer.js
+        │     └── src/core/reporting/reportGenerator.js
+        ├── src/core/runner/parallelExecutor.js
+        │     └── src/core/runner/testWorker.js
+        └── src/core/runner/testReader.js
 ```
 
-## Healing pipeline
+## Test Execution Flow
 
-`src/engines/healing/healingEngine.js` orchestrates:
+1. **`runner.js`** → Loads env config, initializes logger, calls `src/core/runner`
+2. **`src/core/runner/index.js`** → Parses CLI args, discovers test files, routes to sequential or parallel
+3. **`src/core/runner/testExecutor.js`** → Launches browser, preprocesses steps, iterates, writes HTML reports
+4. **`src/core/runner/stepPreprocessor.js`** → Expands ``, substitutes `{{env.x}}` and `{{keyword}}`
+5. **`src/core/runner/stepExecutor.js`** → Resolves each step: StepStore → Action Library → LLM
 
-1. Intent detection via NLP/locator resolver
-2. Focused element capture (`domComparer` + `pageDataCapture`)
-3. Deterministic candidate execution
-4. LLM fallback via `fallbackSelector`
-5. Configurable retries via `retryStrategy`
+## Step Resolution Order
 
-## QA agent
+```
+Step: "Fill email as demo.user@example.com"
+  │
+  ├─ 1. StepStore lookup (data/stepstore.json)
+  │     Hit? → Execute cached Playwright code
+  │
+  ├─ 2. Action Library (deterministic, no LLM)
+  │     Pattern match → Score elements → Generate candidates → Try each
+  │
+  └─ 3. LLM Fallback (Bedrock/OpenAI/Ollama)
+        Capture page elements → Build prompt → Try suggestions → Cache working code
+```
 
-`src/engines/agent/qaAgent.js` loops:
+## Step Preprocessing
 
-1. Capture page state
-2. Ask `actionPlanner` (LLM) for the next step
-3. Execute via the same resolution pipeline as the runner
-4. Generate `.test` file and report on completion
+Before execution, `src/runner/stepPreprocessor.js` processes each step in order:
 
-## Adding an LLM provider
+1. **`@reuse login.test`** — Inlines steps from another `.test` file (searches `tests/` and subfolders).
+2. **`{{env.credentials.email}}`** — Values from `src/config/envConfig.js` for the active `--env`.
+3. **`{{unique}}`, `{{random_email}}`, …** — Dynamic keywords generated at run time.
 
-1. Create `src/providers/llm/providers/yourProvider.js` extending `LLMProvider`
-2. Register in `src/providers/llm/providerFactory.js`
-3. Add config in `src/providers/llm/llmConfig.js`
-4. Set `LLM_PROVIDER=your-provider`
+Reports show both original and resolved text when substitutions occur.
 
-## NPM scripts
+Full reference: [Writing tests](WRITING_TESTS.md).
+
+## QA Agent Mode
+
+The agent autonomously explores a website toward a goal:
+
+```
+Goal: "On https://example.com perform a booking"
+  │
+  ├─ 1. Navigate to URL
+  ├─ 2. Capture page elements (hybrid data capture)
+  ├─ 3. Ask Action Planner LLM: "What's the next step?"
+  │     → LLM returns: "close the offer modal if it is open"
+  ├─ 4. Execute step via: StepStore → Action Library → LLM code gen
+  ├─ 5. Record { step, code, source } if successful
+  ├─ 6. Repeat from step 2 until GOAL_COMPLETE or max steps
+  └─ 7. Generate .test file + agent report
+```
+
+The planner and code generator use **separate LLM calls**:
+- **Planner**: decides *what* to do (natural language step)
+- **Code generator**: decides *how* to do it (Playwright code)
+
+## Adding New LLM Providers
+
+1. Create `src/ai/llm/providers/yourProvider.js` extending `LLMProvider`
+2. Register in `src/ai/llm/llmFactory.js`
+3. Add config in `src/ai/llm/llmConfig.js`
+4. Set `LLM_PROVIDER=your-provider` environment variable
+
+## NPM Scripts
 
 | Script | Command |
 |--------|---------|
 | `npm test` | Run all tests |
-| `npm run smoke` | Run `@smoke` tests |
-| `npm run init` | Scaffold project folders |
-| `npm run test:parallel` | Parallel execution |
+| `npm run smoke` | Run smoke tests |
+| `npm run smoke:parallel` | Run smoke tests in parallel |
+| `npm run test:parallel` | Run all tests in parallel |
+| `npm run test:dev` | Run with develop environment |
+| `npm run test:release` | Run with release environment |
