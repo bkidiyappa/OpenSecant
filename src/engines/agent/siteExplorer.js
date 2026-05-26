@@ -15,7 +15,7 @@
  */
 
 const logger = require('../../utils/logger');
-const { launchBrowser, getDefaultContextOptions } = require('../../runner/browserLauncher');
+const { launchBrowser, getDefaultContextOptions, newPage } = require('../../runner/browserLauncher');
 const { discoverFlowsWithLLM } = require('./flowDiscovery');
 
 const MAX_PAGES = 20;
@@ -395,7 +395,7 @@ async function exploreSite(startUrl, options = {}) {
 
   const browser = await launchBrowser();
   const context = await browser.newContext(getDefaultContextOptions());
-  const page = await context.newPage();
+  const page = await newPage(context);
 
   const visited = new Set();
   const toVisit = [{ url: normalizeUrl(startUrl), entryPath: [] }];

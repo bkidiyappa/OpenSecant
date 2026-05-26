@@ -8,7 +8,7 @@ const report = require('../reporting/htmlReporter');
 const { executeStep } = require('./stepExecutor');
 const { preprocessSteps } = require('./stepPreprocessor');
 const optimizer = require('./performanceOptimizer');
-const { launchBrowser, getDefaultContextOptions } = require('./browserLauncher');
+const { launchBrowser, getDefaultContextOptions, newPage } = require('./browserLauncher');
 const { resetConversationSession } = require('../engines/locator/llmEngine');
 
 /**
@@ -49,7 +49,7 @@ async function runTest(testCaseName, runDir, screenshotsDir) {
   const browser = await launchBrowser();
   const context = await browser.newContext(getDefaultContextOptions());
   
-  const page = await context.newPage();
+  const page = await newPage(context);
   
   let allStepsPassed = true;
   const stepResults = [];

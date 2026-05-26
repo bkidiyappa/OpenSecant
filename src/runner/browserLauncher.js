@@ -8,23 +8,76 @@ const optimizer = require('./performanceOptimizer');
 
 const ENGINES = { chromium, firefox, webkit };
 
+function isHeadlessMode() {
+  try {
+    const envConfig = require('../config/envConfig');
+    return envConfig.testConfig?.headless ?? false;
+  } catch (_) {
+    return false;
+  }
+}
+
 /**
  * Default context options used across test runs and agents.
+ * Headed runs use viewport: null so the page fills the maximized window.
  * @param {Object} [overrides]
  * @returns {Object}
  */
 function getDefaultContextOptions(overrides = {}) {
-  return {
-    viewport: { width: 1920, height: 1080 },
-    deviceScaleFactor: 1,
+  const base = {
     ignoreHTTPSErrors: true,
     javaScriptEnabled: true,
     bypassCSP: true,
     forcedColors: 'none',
     reducedMotion: 'reduce',
+  };
+
+  if (!isHeadlessMode()) {
+    return {
+      ...base,
+      viewport: null,
+      ...overrides,
+    };
+  }
+
+  return {
+    ...base,
+    viewport: { width: 1920, height: 1080 },
+    deviceScaleFactor: 1,
     screen: { width: 1920, height: 1080 },
     ...overrides,
   };
+}
+
+/**
+ * Maximize the browser window (Chromium / Edge / Chrome via CDP).
+ * @param {import('playwright').Page} page
+ */
+async function maximizeWindow(page) {
+  if (isHeadlessMode()) {
+    return;
+  }
+  try {
+    const cdp = await page.context().newCDPSession(page);
+    const { windowId } = await cdp.send('Browser.getWindowForTarget');
+    await cdp.send('Browser.setWindowBounds', {
+      windowId,
+      bounds: { windowState: 'maximized' },
+    });
+  } catch (err) {
+    logger.warning(`Could not maximize browser window: ${err.message}`);
+  }
+}
+
+/**
+ * Create a page and maximize the window in headed mode.
+ * @param {import('playwright').BrowserContext} context
+ * @returns {Promise<import('playwright').Page>}
+ */
+async function newPage(context) {
+  const page = await context.newPage();
+  await maximizeWindow(page);
+  return page;
 }
 
 /**
@@ -74,6 +127,8 @@ function logBrowserConfiguration() {
 module.exports = {
   launchBrowser,
   getDefaultContextOptions,
+  newPage,
+  maximizeWindow,
   logBrowserConfiguration,
   getResolvedBrowserConfig,
 };

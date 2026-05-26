@@ -27,7 +27,7 @@ const { generateUniqueAlphabeticString } = require('../../utils/uniqueStringGene
 const { expect } = require('@playwright/test');
 const { planNextAction } = require('./actionPlanner');
 const { generateTestFile, generateAgentReport } = require('./testGenerator');
-const { launchBrowser, getDefaultContextOptions } = require('../../runner/browserLauncher');
+const { launchBrowser, getDefaultContextOptions, newPage } = require('../../runner/browserLauncher');
 const { sanitizePlaywrightCode } = require('../../providers/llm/responseParser');
 const { summarizeExecError } = require('../../utils/execError');
 
@@ -379,7 +379,7 @@ async function runAgent(goal, options = {}) {
   // Launch browser
   const browser = await launchBrowser();
   const context = await browser.newContext(getDefaultContextOptions());
-  const page = await context.newPage();
+  const page = await newPage(context);
 
   const recordedSteps = [];
   let consecutiveFailures = 0;
@@ -1368,7 +1368,7 @@ async function runComprehensiveQA(promptText) {
 
   const browser = await launchBrowser();
   const context = await browser.newContext(getDefaultContextOptions());
-  const page = await context.newPage();
+  const page = await newPage(context);
 
   const journeyResults = [];
 
