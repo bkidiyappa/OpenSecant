@@ -84,26 +84,33 @@ function getCachedTestCase(testCasePath, readTestCase) {
  * Optimize browser launch options based on system capabilities
  * @returns {Object} Optimized browser launch options
  */
-function getOptimizedBrowserOptions() {
+function getOptimizedBrowserOptions(browserName = 'edge') {
   const testConfig = envConfig.testConfig || {};
 
-  // Base options with reduced flickering settings and fixed resolution
+  // 1. Define realistic, modern human User-Agents per browser type
+  const userAgents = {
+    chromium: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    firefox: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0',
+    webkit: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15'
+  };
+
+  // Base configurations
   const options = {
     headless: testConfig.headless ?? false,
     slowMo: testConfig.slowMo ?? 0,
+    
+    // 2. Inject matching user agent to avoid mismatched browser identity checks
+    userAgent: userAgents[browserName] || userAgents.chromium,
+    
     args: [
-      '--disable-smooth-scrolling',
-      '--disable-animations',
-      '--disable-composited-antialiasing',
-      '--disable-gpu-vsync',
-      '--disable-threaded-animation',
-      '--disable-threaded-scrolling',
+      '--disable-blink-features=AutomationControlled',
+      '--start-maximized', // Replaces fixed window sizes which trigger bot alerts
       '--disable-dev-shm-usage',
       '--disable-setuid-sandbox',
       '--no-sandbox',
-      '--force-device-scale-factor=1',
-      '--window-size=1920,1080',
-      '--window-position=0,0'
+      '--disable-gpu-vsync',
+      '--disable-composited-antialiasing',
+      '--force-device-scale-factor=1'
     ]
   };
   
@@ -113,7 +120,6 @@ function getOptimizedBrowserOptions() {
     const totalMemory = os.totalmem() / (1024 * 1024 * 1024); // Convert to GB
     
     if (totalMemory < 4) {
-      // Low memory system
       logger.warning('Low memory system detected, optimizing browser options');
       options.args.push(
         '--disable-gpu',
@@ -123,9 +129,7 @@ function getOptimizedBrowserOptions() {
         '--disable-accelerated-video-encode'
       );
     } else if (totalMemory >= 16) {
-      // High memory system, can use more resources
       logger.info('High memory system detected, using performance settings');
-      // Already using optimized settings
     }
   } catch (error) {
     logger.warning(`Could not determine system memory: ${error.message}`);
@@ -133,6 +137,7 @@ function getOptimizedBrowserOptions() {
   
   return options;
 }
+  
 
 /**
  * Clear cache to free up memory
