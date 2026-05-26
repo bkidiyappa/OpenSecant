@@ -1,0 +1,51 @@
+{
+  "name": "opensecant",
+  "version": "1.0.0",
+  "description": "Natural-language test automation with Playwright and adaptive locator intelligence",
+  "main": "src/index.js",
+  "bin": {
+    "opensecant": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node src/index.js",
+    "smoke": "node src/index.js --tag smoke",
+    "regression": "node src/index.js regression",
+    "init": "node src/index.js init",
+    "test:dev": "node src/index.js --env=develop",
+    "test:release": "node src/index.js --env=release",
+    "test:preprod": "node src/index.js --env=preprod",
+    "test:prod": "node src/index.js --env=production",
+    "test:parallel": "node src/index.js --parallel",
+    "test:chrome": "node src/index.js --browser=chrome",
+    "test:edge": "node src/index.js --browser=edge",
+    "test:firefox": "node src/index.js --browser=firefox",
+    "cleanup:stepstore": "node scripts/cleanup-stepstore.js"
+  },
+  "keywords": [
+    "playwright",
+    "test-automation",
+    "natural-language",
+    "self-healing",
+    "qa-agent",
+    "llm"
+  ],
+  "license": "ISC",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.842.0",
+    "@playwright/test": "^1.53.2",
+    "ollama": "^0.6.3",
+    "openai": "^6.32.0",
+    "playwright": "^1.40.0"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.40.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/opensecant/opensecant.git"
+  }
+}

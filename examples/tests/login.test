@@ -1,0 +1,7 @@
+@smoke @Login
+
+Navigate to {{env.baseUrl}}/login
+Fill username as {{env.credentials.email}}
+Fill password as {{env.credentials.password}}
+Click Login
+Verify Welcome message is visible

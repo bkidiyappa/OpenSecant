@@ -1,0 +1,11 @@
+node_modules/
+reports/
+debug-prompts/
+.env
+.env.local
+*.log
+.DS_Store
+Thumbs.db
+
+# Local scratch
+node

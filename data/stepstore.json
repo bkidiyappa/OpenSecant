@@ -1,0 +1,6 @@
+{
+  "open www.google.com": "await page.goto('https://www.google.com', { waitUntil: 'domcontentloaded' });",
+  "enter lenevo loq in to search box": "await page.locator('[name=\"q\"]').first().fill('Lenevo LOQ');",
+  "click on google search": "await page.getByRole('button', { name: 'Google Search', exact: false }).first().click();",
+  "verify text displayed these are results for lenovo loq": "await expect(page.getByText('These are results for Lenovo LOQ')).toBeVisible();"
+}
