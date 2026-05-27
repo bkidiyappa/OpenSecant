@@ -146,12 +146,41 @@ class StepStore {
     this.load();
   }
 
+  /**
+   * Read current persisted map (workers may bypass this.data; always fresh from disk when possible).
+   * @returns {Record<string,string>}
+   */
+  readDisk() {
+    try {
+      if (fs.existsSync(this.storePath)) {
+        const raw = fs.readFileSync(this.storePath, 'utf8');
+        const parsed = raw.trim() ? JSON.parse(raw) : {};
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return { ...parsed };
+        }
+      }
+    } catch (err) {
+      logger.warning(`Step store disk read skipped (merge): ${err.message}`);
+    }
+    return {};
+  }
+
+  /**
+   * @param {Record<string,string>} merged
+   */
+  writeDisk(merged) {
+    const dir = path.dirname(this.storePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(this.storePath, JSON.stringify(merged, null, 2), 'utf8');
+  }
+
   load() {
     try {
       if (fs.existsSync(this.storePath)) {
-        this.data = JSON.parse(fs.readFileSync(this.storePath, 'utf8'));
+        this.data = this.readDisk();
         logger.info(`Step store loaded: ${Object.keys(this.data).length} steps`);
       } else {
+        this.data = {};
         logger.info('Step store not found, starting fresh');
       }
     } catch (err) {
@@ -161,9 +190,9 @@ class StepStore {
 
   save() {
     try {
-      const dir = path.dirname(this.storePath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(this.storePath, JSON.stringify(this.data, null, 2), 'utf8');
+      const merged = { ...this.readDisk(), ...this.data };
+      this.data = merged;
+      this.writeDisk(merged);
     } catch (err) {
       logger.error(`Failed to save step store: ${err.message}`);
     }
@@ -171,26 +200,47 @@ class StepStore {
 
   /**
    * Look up playwright code for a step.
-   * Returns the code string or null.
-   * Exact match only — no fuzzy matching to avoid value mismatches.
+   * Reads disk if missing in memory so parallel workers pick up mappings saved by sibling workers.
+   * Exact key match only — no fuzzy matching here.
    */
   resolve(stepText) {
     const normalized = normalizeStep(stepText);
-
     if (this.data[normalized]) {
       return this.data[normalized];
     }
-
+    const disk = this.readDisk();
+    if (disk[normalized]) {
+      this.data[normalized] = disk[normalized];
+      return disk[normalized];
+    }
     return null;
   }
 
   /**
-   * Store a step → code mapping
+   * Store a step → code mapping (merges with latest disk state so parallel workers do not wipe each other's entries).
    */
   set(stepText, code) {
     const normalized = normalizeStep(stepText);
-    this.data[normalized] = code;
-    this.save();
+    const RETRIES = 6;
+    for (let attempt = 0; attempt < RETRIES; attempt++) {
+      try {
+        const merged = this.readDisk();
+        merged[normalized] = code;
+        this.data = merged;
+        this.writeDisk(merged);
+        return;
+      } catch (err) {
+        if (attempt === RETRIES - 1) {
+          logger.error(`Failed to save step store after ${RETRIES} attempts: ${err.message}`);
+          return;
+        }
+        const ms = 5 + Math.floor(Math.random() * 20) + attempt * 8;
+        const until = Date.now() + ms;
+        while (Date.now() < until) {
+          /* sync backoff for contention on stepstore.json */
+        }
+      }
+    }
   }
 
   /**

@@ -102,6 +102,10 @@ Step: "Fill email as demo.user@example.com"
         Capture page elements → Build prompt → Try suggestions → Cache working code
 ```
 
+## Step store and parallel runs
+
+When tests run in **parallel** (`worker_threads`), each worker has its own `StepStore` instance. Successful steps call `StepStore#set`, which must **read the latest `data/stepstore.json` and merge** on every write. Otherwise the last worker to save would overwrite the file with only its own keys and **drop** mappings learned by other workers (e.g. a 4-step test losing all entries when a 2-step test saved last). `StepStore#resolve` also checks disk when a key is missing in memory so workers can reuse keys written by a sibling during the same run.
+
 ## Step Preprocessing
 
 Before execution, `src/runner/stepPreprocessor.js` processes each step in order:

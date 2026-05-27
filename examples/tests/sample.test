@@ -1,0 +1,4 @@
+@demo
+
+Navigate to {{env.baseUrl}}
+Verify page is displayed

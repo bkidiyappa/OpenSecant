@@ -2,6 +2,23 @@ const fs = require('fs');
 const path = require('path');
 const env = require('../config/envConfig');
 
+function escapeHtml(text) {
+  if (text == null || text === '') return '';
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/** Human-readable date/time for reports (Asia/Kolkata). */
+function formatDateTimeIST(date) {
+  if (!date || !(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return 'N/A';
+  }
+  return date.toLocaleString('en-US', { timeZone: 'Asia/Kolkata', hour12: false }) + ' IST';
+}
+
 // Function to generate timestamp string in IST timezone
 function getTimestamp() {
   const now = new Date();
@@ -47,8 +64,11 @@ function createRunDirectory() {
   return { runDir, screenshotsDir, timestamp, reportsBaseDir };
 }
 
-// Function to create HTML report header
-function createHtmlReportHeader(testName, startTime) {
+/**
+ * @param {string} testName
+ * @param {string} startTimeFormatted - IST string from formatDateTimeIST
+ */
+function createHtmlReportHeader(testName, startTimeFormatted) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -65,9 +85,10 @@ function createHtmlReportHeader(testName, startTime) {
     .pass { color: green; }
     .fail { color: red; }
     .step { margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
-    .step-header { display: flex; justify-content: space-between; }
+    .step-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
     .step-name { font-weight: bold; }
-    .step-status { font-weight: bold; }
+    .step-status { font-weight: bold; flex-shrink: 0; }
+    .step-timing { font-size: 0.88em; color: #444; margin-top: 6px; padding: 6px 8px; background: #fafafa; border-radius: 4px; border: 1px solid #eee; }
     .step-resolved { margin-top: 5px; color: #555; font-size: 0.9em; }
     .step-resolved code { background: #e8f4e8; padding: 2px 6px; border-radius: 3px; color: #2d6a2d; }
     .step-details { margin-top: 10px; }
@@ -83,7 +104,7 @@ function createHtmlReportHeader(testName, startTime) {
   <div class="summary-container">
     <div class="summary-column">
       <h3>Time Information</h3>
-      <p><strong>Start Time:</strong> ${startTime}</p>
+      <p><strong>Start Time:</strong> ${startTimeFormatted}</p>
       <p><strong>End Time:</strong> <span id="end-time">Running...</span></p>
       <p><strong>Duration:</strong> <span id="duration">Calculating...</span></p>
     </div>
@@ -105,10 +126,19 @@ function createHtmlReportHeader(testName, startTime) {
 }
 
 // Function to create HTML report footer
-function createHtmlReportFooter(status, endTime, durationSeconds, totalSteps = 0, passedSteps = 0, failedSteps = 0, command = '') {
+function createHtmlReportFooter(
+  status,
+  endTimeFormatted,
+  durationSeconds,
+  totalSteps = 0,
+  passedSteps = 0,
+  failedSteps = 0,
+  command = ''
+) {
   // Calculate duration in minutes
   const durationMinutes = (durationSeconds / 60).toFixed(2);
   const statusClass = status === 'PASS' ? 'pass' : 'fail';
+  const cmdJson = JSON.stringify(command || '');
   return `
   <div class="summary-container">
     <div class="summary-column">
@@ -119,14 +149,15 @@ function createHtmlReportFooter(status, endTime, durationSeconds, totalSteps = 0
   
   <script>
     // Update dynamic elements
-    document.getElementById('end-time').textContent = '${endTime}';
-    document.getElementById('duration').textContent = '${durationMinutes} minutes (${durationSeconds} seconds)';
-    document.getElementById('total-steps').textContent = '${totalSteps}';
-    document.getElementById('passed-steps').textContent = '${passedSteps}';
-    document.getElementById('failed-steps').textContent = '${failedSteps}';
-    if ('${command}') {
-      document.getElementById('command').textContent = '${command}';
-    }
+    document.getElementById('end-time').textContent = ${JSON.stringify(endTimeFormatted)};
+    document.getElementById('duration').textContent = ${JSON.stringify(`${durationMinutes} minutes (${durationSeconds} seconds)`)};
+    document.getElementById('total-steps').textContent = ${JSON.stringify(String(totalSteps))};
+    document.getElementById('passed-steps').textContent = ${JSON.stringify(String(passedSteps))};
+    document.getElementById('failed-steps').textContent = ${JSON.stringify(String(failedSteps))};
+    (function () {
+      var c = ${cmdJson};
+      if (c) document.getElementById('command').textContent = c;
+    })();
   </script>
 </body>
 </html>
@@ -134,8 +165,18 @@ function createHtmlReportFooter(status, endTime, durationSeconds, totalSteps = 0
 }
 
 // Function to add step to HTML report
-// resolvedStep: if provided, shows the resolved value (after {{env}}/{{keyword}} substitution)
-function addStepToHtmlReport(stepName, status, details = '', screenshotPath = null, resolvedStep = null) {
+/**
+ * resolvedStep: if provided, shows the resolved value (after {{env}}/{{keyword}} substitution)
+ * stepTiming: { startTime: Date, durationMs: number }
+ */
+function addStepToHtmlReport(
+  stepName,
+  status,
+  details = '',
+  screenshotPath = null,
+  resolvedStep = null,
+  stepTiming = null
+) {
   const statusClass = status === 'PASS' ? 'pass' : 'fail';
   let html = `
   <div class="step">
@@ -149,6 +190,22 @@ function addStepToHtmlReport(stepName, status, details = '', screenshotPath = nu
     html += `
     <div class="step-resolved">
       <em>Resolved:</em> <code>${resolvedStep}</code>
+    </div>`;
+  }
+
+  if (
+    stepTiming &&
+    stepTiming.startTime instanceof Date &&
+    !Number.isNaN(stepTiming.startTime.getTime()) &&
+    typeof stepTiming.durationMs === 'number'
+  ) {
+    const started = formatDateTimeIST(stepTiming.startTime);
+    const durSec = (stepTiming.durationMs / 1000).toFixed(2);
+    html += `
+    <div class="step-timing">
+      <strong>Started:</strong> ${started}
+      &nbsp;·&nbsp;
+      <strong>Duration:</strong> ${durSec}s (${stepTiming.durationMs} ms)
     </div>`;
   }
 
@@ -180,11 +237,12 @@ function addStepToHtmlReport(stepName, status, details = '', screenshotPath = nu
 }
 
 // Function to create index report
-function createIndexReport(runDir, testReports, command = '') {
+function createIndexReport(runDir, testReports, command = '', executionMeta = {}) {
+  const parallel = !!executionMeta.parallel;
+  const maxWorkers = executionMeta.maxWorkers ?? 1;
   const indexPath = path.join(runDir, 'index.html');
   const timestamp = path.basename(runDir).split('_')[0] + '_' + path.basename(runDir).split('_')[1];
-  const executionTime = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata', hour12: false }) + ' IST';
-  
+
   // Count passed and failed tests
   const passedTests = testReports.filter(test => test.success === true).length;
   const failedTests = testReports.filter(test => test.success === false).length;
@@ -301,8 +359,10 @@ function createIndexReport(runDir, testReports, command = '') {
     </div>
     <div class="summary-column">
       <h3>Execution Details</h3>
-      <p><strong>Command:</strong> ${command}</p>
+      <p><strong>Command:</strong> ${escapeHtml(command) || '(not recorded)'}</p>
       <p><strong>Run Directory:</strong> ${path.basename(runDir)}</p>
+      <p><strong>Execution mode:</strong> ${parallel ? `Parallel (${maxWorkers} worker${maxWorkers === 1 ? '' : 's'})` : 'Sequential (1 worker)'}</p>
+      <p style="font-size:0.9em;color:#555;margin-top:8px;line-height:1.4">When tests run in parallel, <em>wall-clock</em> time is roughly the longest single test, not the sum of each test. Per-test duration is still each file’s own runtime.</p>
     </div>
   </div>
   
@@ -379,6 +439,7 @@ function createIndexReport(runDir, testReports, command = '') {
 
 module.exports = {
   getTimestamp,
+  formatDateTimeIST,
   createRunDirectory,
   createHtmlReportHeader,
   createHtmlReportFooter,

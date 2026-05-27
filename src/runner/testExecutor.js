@@ -38,11 +38,13 @@ async function runTest(testCaseName, runDir, screenshotsDir) {
   const reportStream = fs.createWriteStream(reportFilePath);
   
   const startTime = new Date();
-  const startTimeStr = report.getTimestamp();
   let endTime = new Date();
   let durationSeconds = 0;
-  
-  const headerHtml = report.createHtmlReportHeader(testCase.testName, startTimeStr);
+
+  const headerHtml = report.createHtmlReportHeader(
+    testCase.testName,
+    report.formatDateTimeIST(startTime)
+  );
   reportStream.write(headerHtml);
   
   // Launch browser
@@ -83,7 +85,19 @@ async function runTest(testCaseName, runDir, screenshotsDir) {
 
       // Handle @reuse expansion failure
       if (processed.reuseFailed) {
-        const stepHtml = report.addStepToHtmlReport(displayOriginal, 'FAIL', 'Reused test file not found or empty', null, null);
+        const stepT0 = Date.now();
+        const stepTiming = {
+          startTime: new Date(stepT0),
+          durationMs: Date.now() - stepT0,
+        };
+        const stepHtml = report.addStepToHtmlReport(
+          displayOriginal,
+          'FAIL',
+          'Reused test file not found or empty',
+          null,
+          null,
+          stepTiming
+        );
         reportStream.write(stepHtml);
         failedSteps++;
         allStepsPassed = false;
@@ -93,6 +107,7 @@ async function runTest(testCaseName, runDir, screenshotsDir) {
 
       const stepSlug = displayResolved.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '');
       
+      const stepT0 = Date.now();
       // executeStep uses the RESOLVED text (with actual values)
       const stepResult = await executeStep(page, displayResolved, runDir);
       
@@ -112,7 +127,19 @@ async function runTest(testCaseName, runDir, screenshotsDir) {
           } catch (_) { /* page may be closed */ }
         }
 
-        const stepHtml = report.addStepToHtmlReport(displayOriginal, 'PASS', stepDetails, screenshotRelPath, displayOriginal !== displayResolved ? displayResolved : null);
+        const stepTiming = {
+          startTime: new Date(stepT0),
+          durationMs: Date.now() - stepT0,
+        };
+
+        const stepHtml = report.addStepToHtmlReport(
+          displayOriginal,
+          'PASS',
+          stepDetails,
+          screenshotRelPath,
+          displayOriginal !== displayResolved ? displayResolved : null,
+          stepTiming
+        );
         reportStream.write(stepHtml);
         passedSteps++;
       } else {
@@ -122,7 +149,20 @@ async function runTest(testCaseName, runDir, screenshotsDir) {
         } catch (_) { /* page may be closed */ }
         
         const relativeScreenshotPath = `screenshots/${path.basename(failScreenshot)}`;
-        const stepHtml = report.addStepToHtmlReport(displayOriginal, 'FAIL', stepResult.error, relativeScreenshotPath, displayOriginal !== displayResolved ? displayResolved : null);
+
+        const stepTiming = {
+          startTime: new Date(stepT0),
+          durationMs: Date.now() - stepT0,
+        };
+
+        const stepHtml = report.addStepToHtmlReport(
+          displayOriginal,
+          'FAIL',
+          stepResult.error,
+          relativeScreenshotPath,
+          displayOriginal !== displayResolved ? displayResolved : null,
+          stepTiming
+        );
         reportStream.write(stepHtml);
         failedSteps++;
         allStepsPassed = false;
@@ -142,8 +182,13 @@ async function runTest(testCaseName, runDir, screenshotsDir) {
       });
     }
   } catch (error) {
+    const errT0 = Date.now();
     logger.error(`Error running test: ${error.message}`);
-    const errorHtml = report.addStepToHtmlReport('Test execution', 'FAIL', error.message, null);
+    const stepTiming = {
+      startTime: new Date(errT0),
+      durationMs: Date.now() - errT0,
+    };
+    const errorHtml = report.addStepToHtmlReport('Test execution', 'FAIL', error.message, null, null, stepTiming);
     reportStream.write(errorHtml);
     failedSteps++;
     allStepsPassed = false;
@@ -153,14 +198,14 @@ async function runTest(testCaseName, runDir, screenshotsDir) {
     
     endTime = new Date();
     durationSeconds = (endTime - startTime) / 1000;
-    const endTimeStr = report.getTimestamp();
     const footerHtml = report.createHtmlReportFooter(
-      allStepsPassed ? 'PASS' : 'FAIL', 
-      endTimeStr, 
-      durationSeconds, 
-      totalSteps, 
-      passedSteps, 
-      failedSteps
+      allStepsPassed ? 'PASS' : 'FAIL',
+      report.formatDateTimeIST(endTime),
+      durationSeconds,
+      totalSteps,
+      passedSteps,
+      failedSteps,
+      process.argv.slice(2).join(' ')
     );
     reportStream.write(footerHtml);
     reportStream.end();
@@ -233,7 +278,12 @@ async function runMultipleTests(testCaseNames) {
   }
   
   // Create index.html with links to all test reports using the correct function name
-  report.createIndexReport(runDir, results);
+  report.createIndexReport(
+    runDir,
+    results,
+    process.argv.slice(2).join(' ') || '(opensecant — default batch)',
+    { parallel: false, maxWorkers: 1 }
+  );
   
   return results;
 }

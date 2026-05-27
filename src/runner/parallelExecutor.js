@@ -8,6 +8,10 @@ const logger = require('../utils/logger');
 const report = require('../reporting/htmlReporter');
 const env = require('../config/envConfig');
 
+function getCliSummary() {
+  return process.argv.slice(2).join(' ') || '(opensecant — default batch)';
+}
+
 /**
  * Max parallel workers from testConfig / OPENSECANT_NUM_WORKERS.
  * @returns {number}
@@ -85,10 +89,27 @@ async function runTestsInParallel(testCaseNames, maxWorkers = getConfiguredMaxWo
     worker.on('exit', (code) => {
       activeWorkers.delete(worker);
 
+      const spinNextWorker = () => {
+        if (testQueue.length > 0) {
+          createWorker(testQueue.shift());
+        } else if (activeWorkers.size === 0) {
+          // Allow worker `message` handlers to run before assembling the summary (exit can race ahead).
+          setImmediate(() => {
+            const sorted = results
+              .slice()
+              .sort((a, b) => String(a.testFile || a.testName || '').localeCompare(String(b.testFile || b.testName || '')));
+            report.createIndexReport(runDir, sorted, getCliSummary(), {
+              parallel: true,
+              maxWorkers: workerCount,
+            });
+          });
+        }
+      };
+
       if (testQueue.length > 0) {
         createWorker(testQueue.shift());
       } else if (activeWorkers.size === 0) {
-        report.createIndexReport(runDir, results);
+        spinNextWorker();
       }
 
       if (code !== 0) {

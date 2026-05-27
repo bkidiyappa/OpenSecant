@@ -21,13 +21,14 @@ Usage:
   npx opensecant                     Run all tests
   npx opensecant <test-name>         Run a specific test (.test extension optional)
   npx opensecant --tag <tag-name>    Run tests with the specified tag
-  npx opensecant --parallel          Parallel execution (workers from testConfig.numWorkers)
-  npx opensecant --parallel <n>      Run with n parallel workers
+  npx opensecant --parallel          Force parallel-aware planning when multiple workers are available
+  npx opensecant --parallel <n>      Run with up to n parallel workers
   npx opensecant --env=<env>         Environment: develop, release, preprod, production
   npx opensecant --browser=<name>    chromium, chrome, edge, firefox, webkit
   npx opensecant --help              Show this help
 
-  Default workers: 2 (override with OPENSECANT_NUM_WORKERS)
+  Batches with 2+ tests run in parallel when workers > 1 (override with OPENSECANT_NUM_WORKERS).
+  Summary wall-clock time is about the longest test, not the sum of each table row.
 
 Agent modes:
   npx opensecant --agent "<goal>" [--agent-name <n>] [--agent-max-steps <n>]
