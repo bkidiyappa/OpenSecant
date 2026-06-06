@@ -1,6 +1,12 @@
-@smoke
+@smoke @Search
 
 open www.google.com
 Enter "Lenevo LOQ" in to search box
 Click on Google search
 Verify text displayed "These are results for Lenovo LOQ"
+Click on View All or More on Google which ever is visible
+Click on Intel CPU
+Click on More
+Click on 12 GB RAM
+Click on 2nd link with text "Ideapad Slim"
+PAUSE

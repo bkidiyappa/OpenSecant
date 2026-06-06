@@ -10,6 +10,7 @@ Write tests as plain English. OpenSecant resolves each step through a persistent
 - **Step store** — caches working Playwright code in `data/stepstore.json`
 - **Locator engine** — role/name, label, placeholder, test id priority (Playwright best practices)
 - **Self-healing** — retries with deterministic patterns, then LLM suggestions
+- **Interactive `PAUSE`** — halt a test in the browser until you press Enter in the terminal
 - **QA agent** — autonomous exploration and test generation from goals
 - **Multi-provider LLM** — Bedrock, OpenAI, Ollama, Azure OpenAI
 
@@ -62,13 +63,16 @@ Fill notes as Order {{unique}}
 Verify dashboard is displayed
 ```
 
-See **[Writing tests](docs/WRITING_TESTS.md)** for `@reuse`, all utility keywords (`{{unique}}`, `{{random_email}}`, …), and preprocessing rules.
+See **[Writing tests](docs/WRITING_TESTS.md)** for `@reuse`, utility keywords (`{{unique}}`, `{{random_email}}`, …), the **`PAUSE`** debugging step, and preprocessing rules.
 
 Run:
 
 ```bash
 npx opensecant --tag smoke
-npx opensecant login
+npx opensecant search              # single test by name (searches tests/)
+npx opensecant smoke/search        # single test by path
+npx opensecant --test search       # explicit single-test flag
+npm run test:one -- search         # same via npm (note the --)
 npx opensecant --parallel 4 --tag smoke
 ```
 
@@ -97,6 +101,7 @@ Environment variables (see `.env.example`):
 | `OPENSECANT_NUM_WORKERS` | Parallel test workers |
 | `AI_HEALING_ENABLED` | Enable/disable LLM healing |
 | `LLM_PROVIDER` | `bedrock`, `openai`, `ollama`, `azure` |
+| `OPENSECANT_SKIP_INTERACTIVE_PAUSE` | Set to `true` in CI to skip `PAUSE` steps (omit for local debugging) |
 
 ## Project layout
 
@@ -117,7 +122,7 @@ docs/           Architecture and guides
 ## Documentation
 
 - [System requirements](docs/SYSTEM_REQUIREMENTS.md) — Node, Playwright, GPU for local LLMs
-- [Writing tests](docs/WRITING_TESTS.md) — `@reuse`, `{{env.*}}`, utility keywords
+- [Writing tests](docs/WRITING_TESTS.md) — `@reuse`, `{{env.*}}`, utility keywords, **`PAUSE`**
 - [Architecture](docs/ARCHITECTURE.md)
 - [Action library patterns](docs/ACTION_LIBRARY.md)
 - [QA agent](docs/QA_AGENT.md)

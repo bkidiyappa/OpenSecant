@@ -113,6 +113,59 @@ function extractText(response, provider) {
 }
 
 /**
+ * Detect truncated or malformed Playwright snippets before execution.
+ * @param {string} code
+ * @returns {boolean}
+ */
+function isValidPlaywrightCode(code) {
+  if (!code || typeof code !== 'string') return false;
+
+  const s = code.trim();
+  if (!/^await\s+page\./.test(s)) return false;
+  if (!s.endsWith(';')) return false;
+
+  // Truncated selectors / attributes (common with small LLMs + broken JSON)
+  if (/=\s*;/.test(s)) return false;
+  if (/\[[\w-]+=\s*;/.test(s)) return false;
+  if (/\.(click|fill|press|type|check|selectOption)\(\s*['"`][^'"`]*$/.test(s)) return false;
+
+  let depth = 0;
+  for (const ch of s) {
+    if (ch === '(') depth++;
+    else if (ch === ')') {
+      depth--;
+      if (depth < 0) return false;
+    }
+  }
+  if (depth !== 0) return false;
+
+  for (const q of ['"', "'", '`']) {
+    let n = 0;
+    let escaped = false;
+    for (const ch of s) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === q) n++;
+    }
+    if (n % 2 !== 0) return false;
+  }
+
+  try {
+    // eslint-disable-next-line no-new-func
+    new Function('page', 'expect', `return async () => { ${s} };`);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
  * Clean LLM-generated Playwright code (strip JSON artifacts, fix terminators).
  * @param {string} code
  * @returns {string}
@@ -140,10 +193,23 @@ function sanitizePlaywrightCode(code) {
 
   s = s.trim();
   if (s && !s.endsWith(';')) {
-    s = `${s.replace(/["',}\]]+\s*$/g, '')};`;
+    const trimmed = s.replace(/["',}\]]+\s*$/g, '');
+    if (!isValidPlaywrightCode(`${trimmed};`)) {
+      return '';
+    }
+    s = `${trimmed};`;
   }
 
-  return s.trim();
+  return isValidPlaywrightCode(s) ? s.trim() : '';
+}
+
+/**
+ * Sanitize and keep only executable Playwright snippets.
+ * @param {string} code
+ * @returns {string}
+ */
+function normalizeSuggestion(code) {
+  return sanitizePlaywrightCode(code);
 }
 
 /**
@@ -171,7 +237,24 @@ function extractCodeFromBrokenJson(text) {
     }
   }
 
-  return found.map(sanitizePlaywrightCode).filter(Boolean);
+  return found.map(normalizeSuggestion).filter(Boolean);
+}
+
+/**
+ * Keep unique, valid suggestions only.
+ * @param {string[]} arr
+ * @returns {string[]}
+ */
+function dedupeValidSuggestions(arr) {
+  const out = [];
+  const seen = new Set();
+  for (const item of arr) {
+    const code = normalizeSuggestion(typeof item === 'object' && item?.code ? item.code : item);
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    out.push(code);
+  }
+  return out;
 }
 
 /**
@@ -183,7 +266,13 @@ function extractCodeFromBrokenJson(text) {
 function parseSuggestions(text) {
   if (!text) return [];
 
-  const dedupe = (arr) => [...new Set(arr.filter(Boolean))];
+  let rejectedCount = 0;
+  const collect = (raw) => {
+    const before = Array.isArray(raw) ? raw.length : 1;
+    const valid = dedupeValidSuggestions(Array.isArray(raw) ? raw : [raw]);
+    rejectedCount += Math.max(0, before - valid.length);
+    return valid;
+  };
 
   // Step 1: Extract JSON string (from code block or raw)
   let jsonString = null;
@@ -208,27 +297,23 @@ function parseSuggestions(text) {
       const parsed = JSON.parse(cleaned);
 
       if (parsed.suggestions && Array.isArray(parsed.suggestions)) {
-        return dedupe(
-          parsed.suggestions
-            .map((s) => (typeof s === 'object' && s.code ? s.code : s))
-            .map(sanitizePlaywrightCode),
-        );
+        const valid = collect(parsed.suggestions);
+        if (valid.length > 0) return valid;
       }
       if (Array.isArray(parsed)) {
-        return dedupe(
-          parsed
-            .map((s) => (typeof s === 'object' && s.code ? s.code : s))
-            .map(sanitizePlaywrightCode),
-        );
+        const valid = collect(parsed);
+        if (valid.length > 0) return valid;
       }
       if (parsed.code) {
-        return dedupe([sanitizePlaywrightCode(parsed.code)]);
+        const valid = collect([parsed.code]);
+        if (valid.length > 0) return valid;
       }
     } catch (jsonErr) {
       logger.warning(`JSON parse failed: ${jsonErr.message}`);
       const fromBroken = extractCodeFromBrokenJson(jsonString) || extractCodeFromBrokenJson(text);
       if (fromBroken.length > 0) {
-        return dedupe(fromBroken);
+        const valid = dedupeValidSuggestions(fromBroken);
+        if (valid.length > 0) return valid;
       }
     }
   }
@@ -236,16 +321,23 @@ function parseSuggestions(text) {
   // Step 3: Regex fallback — complete await statements ending with ;
   const awaitMatches = text.match(/await\s+page\.[^;]+;/g);
   if (awaitMatches && awaitMatches.length > 0) {
-    return dedupe(awaitMatches.map(sanitizePlaywrightCode));
+    const valid = dedupeValidSuggestions(awaitMatches);
+    if (valid.length > 0) return valid;
   }
 
   // Step 4: page.* calls without await
   const codePatterns = text.match(/page\.[a-zA-Z]+\([^)]*\)/g);
   if (codePatterns && codePatterns.length > 0) {
-    return dedupe(codePatterns.map((p) => sanitizePlaywrightCode(`await ${p};`)));
+    const valid = dedupeValidSuggestions(
+      codePatterns.map((p) => `await ${p};`),
+    );
+    if (valid.length > 0) return valid;
   }
 
-  logger.warning('Could not parse any suggestions from LLM response');
+  if (rejectedCount > 0) {
+    logger.warning(`Rejected ${rejectedCount} malformed LLM suggestion(s) (truncated or invalid syntax)`);
+  }
+  logger.warning('Could not parse any valid suggestions from LLM response');
   return [];
 }
 
@@ -255,6 +347,8 @@ module.exports = {
   extractOpenAIText,
   extractAnthropicText,
   extractOllamaText,
+  isValidPlaywrightCode,
   sanitizePlaywrightCode,
+  normalizeSuggestion,
   parseSuggestions,
 };

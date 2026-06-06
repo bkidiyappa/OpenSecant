@@ -69,6 +69,68 @@ function findTestFiles(directory) {
   return testFiles;
 }
 
+/**
+ * Normalize a CLI test specifier to a .test basename.
+ * @param {string} spec
+ * @returns {string}
+ */
+function normalizeTestSpec(spec) {
+  let name = (spec || '').trim().replace(/\\/g, '/');
+  if (!name) return '';
+  if (name.endsWith('.test')) return name;
+  if (!name.includes('/')) return `${name}.test`;
+  return name.endsWith('.test') ? name : `${name}.test`;
+}
+
+/**
+ * Resolve one or more test specifiers to absolute file paths under tests/.
+ * @param {string[]} specs — e.g. "search", "smoke/search", "smoke/search.test"
+ * @param {string} testDir — root tests directory
+ * @returns {{ paths: string[], errors: string[] }}
+ */
+function resolveTestPaths(specs, testDir) {
+  const paths = [];
+  const errors = [];
+
+  for (const spec of specs) {
+    const normalized = normalizeTestSpec(spec);
+    if (!normalized) {
+      errors.push('(empty test name)');
+      continue;
+    }
+
+    const directPath = path.isAbsolute(normalized)
+      ? normalized
+      : path.join(testDir, normalized);
+
+    if (fs.existsSync(directPath)) {
+      paths.push(path.resolve(directPath));
+      continue;
+    }
+
+    const baseName = path.basename(normalized);
+    const allTests = findTestFiles(testDir);
+    const matches = allTests.filter((f) => path.basename(f) === baseName);
+
+    if (matches.length === 1) {
+      paths.push(path.resolve(matches[0]));
+      continue;
+    }
+
+    if (matches.length > 1) {
+      const relative = matches.map((f) => path.relative(testDir, f).replace(/\\/g, '/'));
+      errors.push(
+        `"${spec}" is ambiguous (${matches.length} files). Use a path, e.g.: ${relative.join(' or ')}`
+      );
+      continue;
+    }
+
+    errors.push(`"${spec}" — no .test file found under ${testDir}`);
+  }
+
+  return { paths, errors };
+}
+
 function getTestFilesByTag(tag) {
   const testDir = path.join(__dirname, '../../tests');
 
@@ -103,4 +165,6 @@ module.exports = {
   readTestCase,
   findTestFiles,
   getTestFilesByTag,
+  normalizeTestSpec,
+  resolveTestPaths,
 };

@@ -1,6 +1,13 @@
 {
   "open www.google.com": "await page.goto('https://www.google.com', { waitUntil: 'domcontentloaded' });",
+  "open https://google.com": "await page.goto('https://google.com', { waitUntil: 'domcontentloaded' });",
   "enter lenevo loq in to search box": "await page.locator('[name=\"q\"]').first().fill('Lenevo LOQ');",
   "click on google search": "await page.getByRole('button', { name: 'Google Search', exact: false }).first().click();",
-  "verify text displayed these are results for lenovo loq": "await expect(page.getByText('These are results for Lenovo LOQ')).toBeVisible();"
+  "verify text displayed these are results for lenovo loq": "await expect(page.getByText(\"These are results for Lenovo LOQ\", { exact: false })).toBeVisible();",
+  "fill q as lenevo loq": "await page.click('#APjFqb');",
+  "click on view all or more on google which ever is visible": "await page.getByRole('link', { name: 'View all', exact: false }).first().click();",
+  "click on intel cpu": "await page.getByRole('link', { name: 'Intel CPU', exact: false }).first().click();",
+  "click on more": "await page.getByRole('link', { name: 'More', exact: false }).first().click();",
+  "click on 12 gb ram": "await page.getByRole('link', { name: '12 GB RAM', exact: false }).first().click();",
+  "click on 2nd link with text ideapad slim": "await page.getByRole('button', { name: /Ideapad\\s+Slim/i }).nth(1).click();"
 }

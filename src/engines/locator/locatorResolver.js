@@ -23,6 +23,7 @@ const {
   candidatesFromRanked,
   toCodeList,
   elementSearchText,
+  generateOrdinalLinkCandidates,
 } = locator;
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -96,6 +97,20 @@ const ACTION_LIBRARY = {
       });
 
       return toCodeList(candidates);
+    },
+  },
+
+  clickOrdinalLink: {
+    patterns: [
+      /^click (?:on )?(?:the )?(\d+)(?:st|nd|rd|th) link with text (.+)$/i,
+      /^click (?:on )?(?:the )?(\d+)(?:st|nd|rd|th) link (?:that |which )?(?:has|contains|shows) text (.+)$/i,
+    ],
+    generateCode: (match, elements) => {
+      const ordinal = parseInt(match[1], 10);
+      const text = match[2].trim().replace(/^["'](.+)["']$/, '$1');
+      const codes = generateOrdinalLinkCandidates(ordinal, text, elements || []);
+      if (codes.length === 0) return [];
+      return codes;
     },
   },
 
@@ -393,9 +408,7 @@ function tryActionLibrary(step, elements) {
       const matchOriginal = cleaned.match(new RegExp(pattern.source, pattern.flags || 'i'));
       const match = matchOriginal || matchLower;
 
-      if (process.env.OPENSECANT_VERBOSE === 'true') {
-        logger.info(`Action library matched: ${actionType} for "${cleaned}" (${elementCount} elements)`);
-      }
+      logger.info(`Action library matched: ${actionType} for "${cleaned}" (${elementCount} elements)`);
       try {
         const results = action.generateCode(match, elements || [], step);
         if (Array.isArray(results) && results.length > 0) {

@@ -6,7 +6,7 @@ const fs = require('fs');
 const logger = require('../utils/logger');
 const { runTest, runMultipleTests } = require('./testExecutor');
 const { runTestsInParallel, resolveExecutionPlan, getConfiguredMaxWorkers } = require('./parallelExecutor');
-const { findTestFiles, getTestFilesByTag } = require('./testReader');
+const { findTestFiles, getTestFilesByTag, resolveTestPaths } = require('./testReader');
 const report = require('../reporting/htmlReporter');
 const { getStepStore } = require('../store/stepStore');
 
@@ -19,13 +19,19 @@ OpenSecant — Natural-language test automation
 
 Usage:
   npx opensecant                     Run all tests
-  npx opensecant <test-name>         Run a specific test (.test extension optional)
+  npx opensecant <test-name>         Run one test (.test optional; finds under tests/)
+  npx opensecant --test <name>       Same as above (alias: -t)
+  npx opensecant smoke/search        Run by path under tests/
+  npm run test:one -- search         npm shortcut for a single test
   npx opensecant --tag <tag-name>    Run tests with the specified tag
   npx opensecant --parallel          Force parallel-aware planning when multiple workers are available
   npx opensecant --parallel <n>      Run with up to n parallel workers
   npx opensecant --env=<env>         Environment: develop, release, preprod, production
   npx opensecant --browser=<name>    chromium, chrome, edge, firefox, webkit
   npx opensecant --help              Show this help
+
+  Add a PAUSE step in a .test file to halt for manual inspection (press Enter to continue).
+  See docs/WRITING_TESTS.md#interactive-pause--pause
 
   Batches with 2+ tests run in parallel when workers > 1 (override with OPENSECANT_NUM_WORKERS).
   Summary wall-clock time is about the longest test, not the sum of each table row.
@@ -76,6 +82,65 @@ function getExitCodeFromResults(results) {
 }
 
 /**
+ * Extract test names from --test / -t flags.
+ * @param {string[]} args
+ * @returns {string[]}
+ */
+function extractTestFlagSpecs(args) {
+  const specs = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--test' || arg === '-t') {
+      const val = args[i + 1];
+      if (!val || val.startsWith('--')) {
+        throw new Error('Usage: --test <name>  (e.g. --test search or --test smoke/search)');
+      }
+      specs.push(val);
+      i++;
+    } else if (arg.startsWith('--test=')) {
+      const val = arg.slice('--test='.length);
+      if (val) specs.push(val);
+    }
+  }
+  return specs;
+}
+
+/**
+ * Resolve CLI test specifiers and run them.
+ * @param {string[]} specs
+ * @param {string} testDir
+ * @param {{ runParallel?: boolean, numWorkers?: number }} options
+ * @returns {Promise<number>}
+ */
+async function runTestsBySpec(specs, testDir, options = {}) {
+  const { paths, errors } = resolveTestPaths(specs, testDir);
+
+  if (errors.length > 0) {
+    for (const err of errors) {
+      logger.error(err);
+    }
+    return 1;
+  }
+
+  if (paths.length === 0) {
+    logger.error('No valid tests to run');
+    return 1;
+  }
+
+  const plan = resolveExecutionPlan(paths.length, {
+    explicitParallel: options.runParallel,
+    explicitWorkers: options.numWorkers,
+  });
+  const modeLabel = plan.parallel
+    ? `in parallel with ${plan.maxWorkers} workers`
+    : 'sequentially';
+  logger.info(`Running ${paths.length} test(s) ${modeLabel}: ${paths.map((p) => path.relative(testDir, p)).join(', ')}`);
+
+  const results = await executeTests(paths, options);
+  return getExitCodeFromResults(results);
+}
+
+/**
  * Main entry point for the test runner
  * @returns {Promise<number>} Process exit code (0 = pass, 1 = fail)
  */
@@ -103,11 +168,21 @@ async function main() {
       }
     }
     
+    const runOptions = { runParallel, numWorkers };
+    const testFlagSpecs = extractTestFlagSpecs(args);
+
     // Filter out command line flags and their values
     const filteredArgs = args.filter((arg, index) => {
       // Skip --parallel flag and its value
       if (arg === '--parallel') return false;
       if (index > 0 && args[index - 1] === '--parallel' && !arg.startsWith('--')) return false;
+
+      // Skip --test / -t and value
+      if (arg === '--test' || arg === '-t') return false;
+      if (index > 0 && (args[index - 1] === '--test' || args[index - 1] === '-t') && !arg.startsWith('--')) {
+        return false;
+      }
+      if (arg.startsWith('--test=')) return false;
       
       // Skip --env flag and its value
       if (arg === '--env') return false;
@@ -123,6 +198,10 @@ async function main() {
       
       return true;
     });
+
+    if (testFlagSpecs.length > 0) {
+      return runTestsBySpec(testFlagSpecs, testDir, runOptions);
+    }
     
     if (filteredArgs.length === 0) {
       logger.info('No test specified. Running all tests...');
@@ -179,88 +258,7 @@ async function main() {
         return 1;
       }
     } else {
-      // Run a specific test or tests
-      const testCaseNames = filteredArgs.map(arg => {
-        // Check if the test is in a subdirectory
-        if (arg.includes('/') || arg.includes('\\')) {
-          // Already has a path separator, just ensure it has .test extension
-          return arg.endsWith('.test') ? arg : `${arg}.test`;
-        } else {
-          // No path separator, add .test extension if needed
-          return arg.endsWith('.test') ? arg : `${arg}.test`;
-        }
-      });
-      
-      logger.info(`Running specified tests: ${testCaseNames.join(', ')}`);
-      
-      // Check if all test files exist
-      const missingTests = [];
-      const validTests = [];
-      
-      for (const testName of testCaseNames) {
-        // For common test names like 'createlead', check smoke directory first
-        const commonSmokeTests = ['login', 'agent-test'];
-        const baseName = path.basename(testName, '.test');
-        
-        if (commonSmokeTests.includes(baseName)) {
-          // Check smoke directory first for common tests
-          let smokePath = path.join(testDir, 'smoke', path.basename(testName));
-          if (fs.existsSync(smokePath)) {
-            validTests.push(`smoke/${path.basename(testName)}`);
-            logger.info(`Found test in smoke directory: ${smokePath}`);
-            continue;
-          }
-        }
-        
-        // Then check if the test is in the root tests directory
-        let testPath = path.join(testDir, testName);
-        if (fs.existsSync(testPath)) {
-          validTests.push(testName);
-          logger.info(`Found test in root directory: ${testPath}`);
-          continue;
-        }
-        
-        // If not found in root, check if it's in the smoke directory (for non-common tests)
-        if (!commonSmokeTests.includes(baseName)) {
-          testPath = path.join(testDir, 'smoke', path.basename(testName));
-          if (fs.existsSync(testPath)) {
-            validTests.push(`smoke/${path.basename(testName)}`);
-            logger.info(`Found test in smoke directory: ${testPath}`);
-            continue;
-          }
-        }
-        
-        // If still not found, it's missing
-        missingTests.push(testName);
-      }
-      
-      if (missingTests.length > 0) {
-        logger.error(`The following test files were not found: ${missingTests.join(', ')}`);
-        process.exit(1);
-      }
-      
-      // Run the valid tests
-      if (validTests.length > 0) {
-        // Create absolute paths for the tests
-        const testPaths = validTests.map(test => {
-          // Make sure we don't double-concatenate paths
-          return path.isAbsolute(test) ? test : path.join(testDir, test);
-        });
-        
-        const plan = resolveExecutionPlan(testPaths.length, {
-          explicitParallel: runParallel,
-          explicitWorkers: numWorkers,
-        });
-        const modeLabel = plan.parallel
-          ? `in parallel with ${plan.maxWorkers} workers`
-          : 'sequentially';
-        logger.info(`Running ${testPaths.length} tests ${modeLabel} (configured max: ${getConfiguredMaxWorkers()})`);
-
-        const results = await executeTests(testPaths, { runParallel, numWorkers });
-        return getExitCodeFromResults(results);
-      }
-      logger.error('No valid tests to run');
-      return 1;
+      return runTestsBySpec(filteredArgs, testDir, runOptions);
     }
 
     return 0;

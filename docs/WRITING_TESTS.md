@@ -195,6 +195,69 @@ Then each resolved step is executed: StepStore → locator engine → LLM healin
 
 ---
 
+## Interactive pause — `PAUSE`
+
+Add a step that is **exactly** `PAUSE` (case-insensitive; optional leading number such as `12. PAUSE`) to halt the run so you can inspect the application, adjust data or UI, then continue manually.
+
+### Example
+
+```text
+@smoke
+open www.google.com
+Enter "Lenovo LOQ" in to search box
+Click on Google search
+Click on View All
+PAUSE
+Click on 2nd link with text "Ideapad Slim"
+```
+
+### What happens at runtime
+
+| Phase | Behavior |
+|-------|----------|
+| Before `PAUSE` | Prior steps run normally (step store, action library, or LLM). |
+| At `PAUSE` | Console shows a **TEST PAUSED** banner; the browser stays on the current page. |
+| Resume | Press **Enter** in the **same terminal** that launched the test. |
+| After resume | Remaining steps execute as usual. |
+
+`PAUSE` does not generate Playwright code and is not stored in `data/stepstore.json`.
+
+### Running tests that use `PAUSE`
+
+Use a **single test** and a **real terminal** (PowerShell, CMD, or the IDE integrated terminal):
+
+```bash
+npx opensecant search
+# or
+npm run test:one -- search
+```
+
+Do **not** rely on `npm run smoke` if you only want one file — that runs every smoke test.
+
+### Requirements and limitations
+
+| Topic | Detail |
+|-------|--------|
+| **vs timed wait** | `Pause for 5 seconds` is a timed wait ([Action library](ACTION_LIBRARY.md)). Bare `PAUSE` waits for you. |
+| **Parallel runs** | `PAUSE` does not work in worker threads. Run sequentially (`OPENSECANT_NUM_WORKERS=1` and avoid `--parallel` with multiple tests). |
+| **Non-interactive stdin** | If stdin is not a TTY, the step fails with a clear error. |
+| **CI / automation** | Set `OPENSECANT_SKIP_INTERACTIVE_PAUSE=true` in `.env` to skip `PAUSE` with a warning (step still passes). **Leave this unset or commented out for local debugging.** |
+
+### Environment variable
+
+In `.env`:
+
+```env
+# Uncomment only for CI — skips PAUSE instead of waiting for Enter
+# OPENSECANT_SKIP_INTERACTIVE_PAUSE=true
+```
+
+### HTML reports
+
+Paused steps are recorded as **PASS** with the message: `Paused for manual inspection; continued after Enter`. If skip-env is set, the report notes that the pause was skipped.
+
+---
+
 ## Runtime utilities (Playwright execution)
 
 When OpenSecant runs or generates Playwright code, these are available in the execution scope:

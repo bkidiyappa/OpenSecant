@@ -442,6 +442,145 @@ function buildIdLocator(profile) {
   };
 }
 
+function buildHrefLocator(profile) {
+  const href = profile.attrs?.href;
+  if (!href || href === '#' || /^javascript:/i.test(href)) return null;
+  return {
+    strategy: 'href',
+    priority: 96,
+    score: 0,
+    code: `page.locator('a[href="${esc(href)}"]')`,
+    description: `href="${href.slice(0, 60)}"`,
+  };
+}
+
+function linkMatchesText(el, linkText) {
+  const search = elementSearchText(el).toLowerCase();
+  const target = (linkText || '').toLowerCase().trim();
+  if (!target) return false;
+  if (search.includes(target)) return true;
+  const words = target.split(/\s+/).filter((w) => w.length >= 2);
+  return words.length > 0 && words.every((w) => search.includes(w));
+}
+
+/** Links, or button/card overlays (e.g. Google Shopping product tiles). */
+function isOrdinalClickTarget(el) {
+  if (!isClickable(el)) return false;
+  const profile = normalizeElement(el);
+  if (el.tag === 'a' || profile.role === 'link') return true;
+  if (profile.role === 'button') return true;
+  return false;
+}
+
+function buildTextRegexPattern(linkText) {
+  const reBody = (linkText || '')
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/\s+/g, '\\s+');
+  return `/${reBody}/i`;
+}
+
+function compareDomPosition(a, b) {
+  const ay = a.position?.y ?? a._captureIndex ?? 0;
+  const by = b.position?.y ?? b._captureIndex ?? 0;
+  if (ay !== by) return ay - by;
+  return (a.position?.x ?? 0) - (b.position?.x ?? 0);
+}
+
+const { buildOrdinalLinkLocatorFallbacks } = require('../../utils/ordinalLinkStep');
+
+/**
+ * Pick the Nth link matching text in DOM order; prefer element-specific locators, then scoped .nth().
+ * @param {number} ordinal — 1-based (2 = second link)
+ * @param {string} linkText
+ * @param {Array} elements — hybrid page elements
+ * @returns {string[]} Playwright code candidates
+ */
+function generateOrdinalLinkCandidates(ordinal, linkText, elements) {
+  const index = Math.max(0, ordinal - 1);
+  const textWords = extractWords(linkText);
+  const candidates = [];
+  const seen = new Set();
+
+  const add = (code) => {
+    if (!code || seen.has(code)) return;
+    seen.add(code);
+    candidates.push(code);
+  };
+
+  const re = buildTextRegexPattern(linkText);
+
+  const matchingTargets = (elements || [])
+    .map((el, captureIndex) => ({ ...el, _captureIndex: captureIndex }))
+    .filter((el) => isOrdinalClickTarget(el) && linkMatchesText(el, linkText))
+    .sort(compareDomPosition);
+
+  if (matchingTargets.length > 0) {
+    const targetEl = matchingTargets[index];
+    if (targetEl) {
+      const profile = normalizeElement(targetEl);
+      logger.info(
+        `Ordinal link #${ordinal}: selected <${targetEl.tag} role=${profile.role}> `
+        + `"${elementSearchText(targetEl).slice(0, 80)}" `
+        + `(${matchingTargets.length} match(es) in DOM order)`,
+      );
+
+      const accessibleName = getAccessibleName(targetEl);
+      if (accessibleName && accessibleName.length <= 200) {
+        add(
+          `await page.getByRole('${profile.role}', { name: ${JSON.stringify(accessibleName)}, exact: false }).click();`,
+        );
+      }
+
+      if (profile.role === 'button') {
+        add(`await page.getByRole('button', { name: ${re} }).nth(${index}).click();`);
+        const ariaLabel = profile.attrs?.['aria-label'];
+        if (ariaLabel) {
+          const needle = esc(linkText.split(/\s+/).find((w) => w.length >= 3) || linkText);
+          add(
+            `await page.locator('[role="button"][aria-label*="${needle}"]').nth(${index}).click();`,
+          );
+          if (profile.attrs?.['aria-hidden'] === 'true') {
+            add(
+              `await page.locator('[role="button"][aria-label*="${needle}"]').nth(${index}).click({ force: true });`,
+            );
+          }
+        }
+      }
+
+      const locs = buildLocatorStrategies(profile, textWords, linkText);
+      const hrefLoc = buildHrefLocator(profile);
+      if (hrefLoc) {
+        hrefLoc.score = 1000;
+        locs.unshift(hrefLoc);
+      }
+
+      for (const code of toCodeList(
+        candidatesFromRanked(
+          [{ profile, matchScore: 1, locators: locs }],
+          (loc) => `${loc}.click()`,
+          { maxCandidates: 8 },
+        ),
+      )) {
+        add(code);
+      }
+    } else {
+      logger.warning(
+        `Ordinal link: ${matchingTargets.length} target(s) match "${linkText}", step asks for #${ordinal} — using .nth() fallbacks`,
+      );
+    }
+  } else if ((elements || []).length > 0) {
+    logger.warning(
+      `Ordinal link: no captured links/buttons match "${linkText}" — using .nth() fallbacks`,
+    );
+  }
+
+  for (const code of buildOrdinalLinkLocatorFallbacks(ordinal, linkText)) {
+    add(code);
+  }
+
+  return candidates;
+}
+
 /**
  * Generate all applicable Playwright locators for an element (ordered by strategy priority).
  */
@@ -485,6 +624,7 @@ function buildLocatorStrategies(profile, targetWords, fieldName = '') {
   }
   if (overlapSearch >= 0.55) {
     add(buildNameAttrLocator(profile), overlapSearch);
+    add(buildHrefLocator(profile), overlapSearch);
     if (overlapTestId < 0.7) {
       add(buildIdLocator(profile), overlapSearch);
     }
@@ -609,6 +749,10 @@ module.exports = {
   editDistance,
   abbreviationMatch,
   fieldAbbreviations,
+  generateOrdinalLinkCandidates,
+  linkMatchesText,
+  isOrdinalClickTarget,
+  buildTextRegexPattern,
   esc,
   getTestId,
   getImplicitRole,

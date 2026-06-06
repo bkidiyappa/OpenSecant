@@ -54,7 +54,25 @@ The Action Library is a **deterministic pattern-matching system** that generates
 await page.goto('https://example.com', { waitUntil: 'domcontentloaded' });
 ```
 
-### 2. Click Actions
+### 2. Ordinal link click
+**Patterns:**
+- `Click on <N>nd link with text "<text>"` (e.g. `Click on 2nd link with text "Ideapad Slim"`)
+
+**How it works:**
+1. Finds `<a>` / `role=link` elements whose text contains the quoted string (case-insensitive).
+2. Sorts matches by page position (top-to-left).
+3. Clicks the **Nth** match using that element's **specific** locator (`href`, `data-testid`, `id`, or exact role+name).
+
+**Fallback (always tried):** scoped positional locators for the Nth match (buttons first — Google Shopping uses `role="button"` overlays):
+
+```javascript
+await page.getByRole('button', { name: /Ideapad\s+Slim/i }).nth(1).click(); // 2nd match
+await page.getByRole('link').filter({ hasText: /Ideapad\s+Slim/i }).nth(1).click();
+```
+
+**Step store:** Cached code is valid if it uses `.nth(ordinal−1)` or element-specific `href` / `data-testid`.
+
+### 3. Click Actions
 **Patterns:**
 - `Click on <element>`
 - `Press <button>`
@@ -80,7 +98,7 @@ await page.getByTestId('submit-btn').first().click();
 await page.getByText('Submit', { exact: false }).first().click();
 ```
 
-### 3. Fill/Type Actions
+### 4. Fill/Type Actions
 **Patterns:**
 - `Fill <field> as <value>`
 - `Enter <value> in <field>`
@@ -135,7 +153,18 @@ await page.waitForLoadState('domcontentloaded');
 await page.waitForLoadState('networkidle');
 ```
 
-### 6. Hard Wait
+### 6. Interactive pause (manual)
+**Pattern:**
+- `PAUSE` — exact word only (case-insensitive; not `Pause for 5 seconds`)
+
+**Behavior:**
+- Implemented in `src/utils/interactivePause.js` (not the action library / LLM).
+- Stops the test until the operator presses **Enter** in the terminal; browser stays open.
+- Skipped when `OPENSECANT_SKIP_INTERACTIVE_PAUSE=true`; fails in parallel workers or non-TTY stdin.
+
+Full guide: [Writing tests — Interactive pause](WRITING_TESTS.md#interactive-pause--pause).
+
+### 7. Hard Wait
 **Patterns:**
 - `Wait for <N> seconds`
 - `Pause for <N> seconds`
@@ -148,7 +177,7 @@ await page.waitForTimeout(5000);
 
 *Fast-path: skips element capture entirely (no DOM data needed).*
 
-### 7. Check/Uncheck
+### 8. Check/Uncheck
 **Patterns:**
 - `Check <checkbox>`
 - `Tick <checkbox>`
@@ -161,7 +190,7 @@ await page.getByLabel('service reminder', { exact: false }).first().check();
 await page.getByTestId('terms-checkbox').uncheck();
 ```
 
-### 8. Validation/Assertion
+### 9. Validation/Assertion
 **Patterns:**
 - `Validate <element> is displayed`
 - `Verify <element> is visible`

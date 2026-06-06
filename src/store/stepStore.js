@@ -8,6 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const logger = require('../utils/logger');
+const { isOrdinalLinkStepCodeValid } = require('../utils/ordinalLinkStep');
 
 const STORE_PATH = path.join(__dirname, '../../data/stepstore.json');
 
@@ -220,6 +221,12 @@ class StepStore {
    * Store a step → code mapping (merges with latest disk state so parallel workers do not wipe each other's entries).
    */
   set(stepText, code) {
+    if (!isOrdinalLinkStepCodeValid(stepText, code)) {
+      logger.warning(
+        `StepStore: not caching code for "${stepText}" — ordinal link code must use .nth(N) where N = ordinal−1, or element-specific href/testid`,
+      );
+      return;
+    }
     const normalized = normalizeStep(stepText);
     const RETRIES = 6;
     for (let attempt = 0; attempt < RETRIES; attempt++) {

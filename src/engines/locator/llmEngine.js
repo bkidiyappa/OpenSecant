@@ -14,6 +14,11 @@ const { config } = require('../../providers/llm/llmConfig');
 const { captureHybridInputData } = require('./pageDataCapture');
 const { filterRelevantElements } = require('./elementFiltering');
 const { paths: frameworkPaths } = require('../../config/frameworkConfig');
+const {
+  parseOrdinalLinkStep,
+  buildOrdinalLinkLocatorFallbacks,
+  ordinalLocatorIndexMatches,
+} = require('../../utils/ordinalLinkStep');
 
 function isDebugPromptsEnabled() {
   return (process.env.DEBUG_PROMPTS || '').toLowerCase() === 'true';
@@ -53,7 +58,7 @@ Locator priority: data-testid > id > name > role > text > CSS.
 Actions: click→.click(), fill→.fill(value), select→click dropdown then option, check→.check(), wait→waitForTimeout, navigate→page.goto(), verify→expect(...).toBeVisible().
 
 Return ONLY JSON: {"suggestions":[{"code":"await page...","explanation":"why"}]}
-Give 2 suggestions. Use exact attribute values from page elements. Never use .first()/.nth(). Never use page.goto() to fix click failures.`,
+Give 2 suggestions. For "Nth link with text X": prefer getByRole('button', { name: /X/i }).nth(N-1) for shopping cards, else getByRole('link').filter({ hasText: /X/i }).nth(N-1). Never use page.goto() to fix click failures.`,
     cache_control: { type: 'ephemeral' }
   };
 }
@@ -114,9 +119,10 @@ CRITICAL RULES:
 - **DATA-TESTID IS KING**: If an element has a data-testid attribute, you MUST use page.getByTestId() for it. NEVER use name, id, or other attributes when data-testid is available on that element. For example, if an input has data-testid="wo-customer-input-firstName" AND name="fName", ALWAYS use getByTestId('wo-customer-input-firstName'), NEVER use input[name="fName"].
 - When duplicates exist, the element with data-testid is almost always the correct target (the primary form field). An element WITHOUT data-testid is usually a secondary/duplicate field.
 - NEVER use empty text filters like .filter({ hasText: '' })
-- NEVER use .first() or .nth() — these are fragile and break when the page changes
+- Avoid bare getByText('...').first() when multiple matches exist
 - Use EXACT attribute values from the element data — never simplify IDs
-- Elements in the provided data include a domOrder field. domOrder=1 is the FIRST element on the page. Always prefer the element with the LOWEST domOrder when multiple match.
+- Elements include domOrder (ascending in the list). For duplicate text, lower domOrder = earlier on page.
+- **ORDINAL LINK STEPS** (e.g. "Click on 2nd link with text Ideapad Slim"): click the Nth clickable whose label contains the text. On shopping grids use role="button" + aria-label (e.g. getByRole('button', { name: /Ideapad\\s+Slim/i }).nth(1)). Also try href from element list. 0-based .nth index = ordinal−1.
 
 # HANDLING ERRORS (when original code failed)
 If original code and error message are provided:
@@ -153,7 +159,7 @@ RULES:
 - **NEVER use page.evaluate() with raw DOM clicks** (e.g. element.click() inside evaluate). Always use Playwright's built-in locator methods.
 - **NEVER construct URLs from env variables** as a workaround for element interaction failures.
 - **NEVER use auto-generated or dynamic IDs** that contain colons or random characters (e.g. #\\:r1g\\:, #\\:rs\\:). These change between sessions and will break.
-- **NEVER use .first(), .nth(), or .last()** — these are position-dependent and fragile. Use a unique locator instead.
+- For ordinal link steps, .nth(N) is correct when N = ordinal−1 (2nd link → .nth(1)). Scope with getByRole('link').filter({ hasText: /.../i }) or getByText(/.../i).
 - **NEVER use .filter({ hasText: '' })** — empty text filter matches everything.
 - All suggestions must use stable Playwright locator APIs (getByTestId, getByRole, getByText, getByLabel, getByPlaceholder, locator with stable attributes).`,
     cache_control: { type: 'ephemeral' }
@@ -290,10 +296,17 @@ async function suggestAlternativeLocators(page, step, originalCode, errorMessage
       ? `Elements (${sentCount} of ${totalOnPage}, domOrder ascending):\n`
       : `Page elements (${sentCount} of ${totalOnPage} shown, filtered by relevance, domOrder=1 is FIRST on page — prefer lower domOrder):\n`;
     
+    const ordinalStep = parseOrdinalLinkStep(step);
+    const ordinalHint = ordinalStep
+      ? `\nORDINAL LINK: Click the ${ordinalStep.ordinal}${ordinalStep.ordinal === 1 ? 'st' : ordinalStep.ordinal === 2 ? 'nd' : ordinalStep.ordinal === 3 ? 'rd' : 'th'} item containing "${ordinalStep.text}". `
+        + `On Google Shopping these are often role="button" with aria-label (not <a>). Prefer page.getByRole('button', { name: /${ordinalStep.text.replace(/\s+/g, '\\s+')}/i }).nth(${ordinalStep.index}) `
+        + `or the ${ordinalStep.ordinal}th matching row's aria-label/href from the element list.\n`
+      : '';
+
     const dynamicPrompt = `Step: ${step}
 URL: ${currentUrl}
 ${originalCode && !originalCode.includes('No existing code') ? `Original code (failed): ${originalCode}\nError: ${errorMessage}` : `Context: ${errorMessage || 'New step — generate from scratch'}`}
-
+${ordinalHint}
 ${elementHeader}${elementsJson}
 
 Return JSON with suggestions array.`;
@@ -383,9 +396,36 @@ Return JSON with suggestions array.`;
     }
 
     // Parse suggestions with unified parser
-    const suggestions = parseSuggestions(assistantMessage);
+    let suggestions = parseSuggestions(assistantMessage);
 
-    logger.info(`LLM returned ${suggestions.length} locator(s) (${llmProvider.getName()})`);
+    if (ordinalStep) {
+      const before = suggestions.length;
+      suggestions = suggestions.filter((code) => {
+        if (!/\.(?:first|nth)\(/i.test(code)) return true;
+        return ordinalLocatorIndexMatches(step, code);
+      });
+      if (before > suggestions.length) {
+        logger.warning(
+          `Rejected ${before - suggestions.length} LLM suggestion(s) with wrong .first()/.nth() index for ordinal link`,
+        );
+      }
+    }
+
+    if (suggestions.length === 0 && ordinalStep) {
+      suggestions = buildOrdinalLinkLocatorFallbacks(ordinalStep.ordinal, ordinalStep.text);
+      if (suggestions.length > 0) {
+        logger.info(`Using ${suggestions.length} built-in ordinal link locator(s) for "${step}"`);
+      }
+    }
+
+    if (suggestions.length === 0) {
+      logger.warning(
+        `LLM returned no valid locators (${llmProvider.getName()}). `
+        + 'Small models often truncate JSON — try a larger model or rely on the action library.'
+      );
+    }
+
+    logger.info(`LLM returned ${suggestions.length} valid locator(s) (${llmProvider.getName()})`);
     suggestions.forEach((code, i) => {
       logger.info(`  LLM locator ${i + 1}: ${code}`);
     });

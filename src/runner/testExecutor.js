@@ -112,9 +112,14 @@ async function runTest(testCaseName, runDir, screenshotsDir) {
       const stepResult = await executeStep(page, displayResolved, runDir);
       
       if (stepResult.success) {
-        const stepDetails = stepResult.usedAlternative ? 
-          `Step passed using alternative locator: ${stepResult.alternativeCode}` : 
-          'Step passed';
+        let stepDetails = 'Step passed';
+        if (stepResult.interactivePause) {
+          stepDetails = stepResult.interactivePauseSkipped
+            ? stepResult.message
+            : 'Paused for manual inspection; continued after Enter';
+        } else if (stepResult.usedAlternative) {
+          stepDetails = `Step passed using alternative locator: ${stepResult.alternativeCode}`;
+        }
         
         // Capture screenshot on last step
         let screenshotRelPath = null;

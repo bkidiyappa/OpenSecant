@@ -10,6 +10,7 @@
     "start": "node src/index.js",
     "test": "node src/index.js",
     "smoke": "node src/index.js --tag smoke",
+    "test:one": "node src/index.js",
     "regression": "node src/index.js regression",
     "init": "node src/index.js init",
     "test:dev": "node src/index.js --env=develop",

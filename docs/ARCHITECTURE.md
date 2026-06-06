@@ -85,7 +85,17 @@ Test Runner dependency detail:
 2. **`src/core/runner/index.js`** → Parses CLI args, discovers test files, routes to sequential or parallel
 3. **`src/core/runner/testExecutor.js`** → Launches browser, preprocesses steps, iterates, writes HTML reports
 4. **`src/core/runner/stepPreprocessor.js`** → Expands ``, substitutes `{{env.x}}` and `{{keyword}}`
-5. **`src/core/runner/stepExecutor.js`** → Resolves each step: StepStore → Action Library → LLM
+5. **`src/core/runner/stepExecutor.js`** → Resolves each step: StepStore → Action Library → LLM (or interactive `PAUSE`)
+
+## Interactive `PAUSE` steps
+
+Steps that normalize to exactly `PAUSE` are handled in `src/runner/stepExecutor.js` before the step store or healing engine (`src/utils/interactivePause.js`):
+
+- Logs a **TEST PAUSED** banner and waits for **Enter** on stdin
+- Requires a sequential, interactive terminal (not worker threads / non-TTY stdin)
+- `OPENSECANT_SKIP_INTERACTIVE_PAUSE=true` skips the wait in CI (step still passes)
+
+See [Writing tests — Interactive pause](WRITING_TESTS.md#interactive-pause--pause).
 
 ## Step Resolution Order
 
@@ -97,9 +107,11 @@ Step: "Fill email as demo.user@example.com"
   │
   ├─ 2. Action Library (deterministic, no LLM)
   │     Pattern match → Score elements → Generate candidates → Try each
+  │     (console logs each locator: `Locator 1/N → await page....`)
   │
   └─ 3. LLM Fallback (Bedrock/OpenAI/Ollama)
         Capture page elements → Build prompt → Try suggestions → Cache working code
+        (same locator logging: `LLM 1/N → ...`, `Text fallback 1/N → ...`)
 ```
 
 ## Step store and parallel runs

@@ -8,6 +8,13 @@ const { getStepStore } = require('../store/stepStore');
 const { sanitizePlaywrightCode } = require('../providers/llm/responseParser');
 const { healStep, waitForPageStable } = require('../engines/healing/healingEngine');
 const { summarizeExecError } = require('../utils/execError');
+const { isInteractivePauseStep, runInteractivePause } = require('../utils/interactivePause');
+const { isOrdinalLinkStepCodeValid, parseOrdinalLinkStep } = require('../utils/ordinalLinkStep');
+
+function truncateForLog(code, max = 120) {
+  const oneLine = (code || '').replace(/\s+/g, ' ').trim();
+  return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine;
+}
 
 async function execCode(page, code) {
   const cleaned = sanitizePlaywrightCode(code);
@@ -40,13 +47,34 @@ async function stabilizeIfNeeded(page, step) {
 
 async function executeStep(page, step, runDir = null) {
   try {
-    const stepStore = getStepStore();
     const stepNameClean = step.replace(/^\d+\.\s*/, '').trim();
-    const code = stepStore.resolve(stepNameClean);
+
+    if (isInteractivePauseStep(step)) {
+      const pauseResult = await runInteractivePause(step);
+      return {
+        success: true,
+        message: pauseResult.message,
+        interactivePause: true,
+        interactivePauseSkipped: !!pauseResult.skipped,
+      };
+    }
+
+    const stepStore = getStepStore();
+    let code = stepStore.resolve(stepNameClean);
     let stepStoreError = null;
+
+    if (code && !isOrdinalLinkStepCodeValid(stepNameClean, code)) {
+      const ord = parseOrdinalLinkStep(stepNameClean);
+      logger.warning(
+        `StepStore skipped for ordinal link step "${stepNameClean}" — cached code does not match required link index`,
+      );
+      logger.info(`  Cached (ignored): ${truncateForLog(code)}`);
+      code = null;
+    }
 
     if (code) {
       logger.info(`StepStore hit for "${stepNameClean}"`);
+      logger.info(`  StepStore locator → ${truncateForLog(code)}`);
       try {
         await execCode(page, code);
         logger.success(`Step executed from StepStore: ${stepNameClean}`);

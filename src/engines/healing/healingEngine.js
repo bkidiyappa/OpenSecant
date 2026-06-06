@@ -7,7 +7,8 @@ const { tryActionLibrary, getActionType } = require('../locator/locatorResolver'
 const { captureHybridInputData } = require('../locator/pageDataCapture');
 const { filterRelevantElements } = require('../locator/elementFiltering');
 const { config: llmConfig } = require('../../providers/llm/llmConfig');
-const { sanitizePlaywrightCode } = require('../../providers/llm/responseParser');
+const { sanitizePlaywrightCode, isValidPlaywrightCode } = require('../../providers/llm/responseParser');
+const { parseOrdinalLinkStep, buildOrdinalLinkLocatorFallbacks } = require('../../utils/ordinalLinkStep');
 const { suggestAlternativeLocators } = require('./fallbackSelector');
 const { getMaxHealRounds } = require('./retryStrategy');
 const { summarizeExecError } = require('../../utils/execError');
@@ -19,25 +20,65 @@ function truncateCode(code, max = 80) {
   return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine;
 }
 
+/** Format Playwright code for console logs. */
+function formatLocatorForLog(code, max = 500) {
+  return truncateCode(code, max);
+}
+
 /**
- * Run candidate Playwright snippets; return first success or null.
+ * Last-resort click locators from plain-English target text.
+ * @param {string} stepDescription
+ * @returns {string[]}
  */
+function buildTextClickFallback(stepDescription) {
+  const ord = parseOrdinalLinkStep(stepDescription);
+  if (ord) {
+    return buildOrdinalLinkLocatorFallbacks(ord.ordinal, ord.text).filter(isValidPlaywrightCode);
+  }
+
+  const match = stepDescription.match(/^click (?:on |the )?(.+?)(?:\s+button)?$/i);
+  if (!match) return [];
+
+  const target = match[1].trim();
+  if (!target) return [];
+
+  return [
+    `await page.getByRole('link', { name: ${JSON.stringify(target)}, exact: false }).first().click();`,
+    `await page.getByRole('button', { name: ${JSON.stringify(target)}, exact: false }).first().click();`,
+    `await page.getByText(${JSON.stringify(target)}, { exact: false }).first().click();`,
+  ].filter(isValidPlaywrightCode);
+}
+
 async function tryCandidates(candidates, label, page, stepDescription, stepStore, execCode) {
   if (!candidates || candidates.length === 0) return null;
 
-  logger.info(`${label}: trying ${candidates.length} candidate(s)`);
+  const validCandidates = candidates.filter((code) => {
+    const ok = isValidPlaywrightCode(code);
+    if (!ok && VERBOSE) {
+      logger.warning(`${label}: skipping invalid candidate: ${truncateCode(code)}`);
+    }
+    return ok;
+  });
+
+  const skipped = candidates.length - validCandidates.length;
+  if (skipped > 0) {
+    logger.warning(`${label}: skipped ${skipped} malformed suggestion(s)`);
+  }
+  if (validCandidates.length === 0) return null;
+
+  logger.info(`${label}: trying ${validCandidates.length} candidate(s)`);
 
   let lastError = '';
-  for (let i = 0; i < candidates.length; i++) {
-    const code = candidates[i];
-    if (VERBOSE) {
-      logger.info(`${label} ${i + 1}/${candidates.length}: ${code}`);
-    }
+  let lastCode = '';
+  for (let i = 0; i < validCandidates.length; i++) {
+    const code = validCandidates[i];
+    const attemptLabel = `${label} ${i + 1}/${validCandidates.length}`;
+    logger.info(`${attemptLabel} → ${formatLocatorForLog(code)}`);
 
     try {
       await execCode(page, code);
       if (isMeaningfulCode(code, stepDescription)) stepStore.set(stepDescription, code);
-      logger.success(`${label}: candidate ${i + 1}/${candidates.length} worked`);
+      logger.success(`${attemptLabel} worked → ${formatLocatorForLog(code)}`);
       return { success: true, code, source: label.includes('LLM') ? 'llm' : 'library' };
     } catch (err) {
       const isWaitTimeout = /waitForLoadState|waitForSelector|waitForNavigation|waitForURL/.test(code) &&
@@ -46,18 +87,21 @@ async function tryCandidates(candidates, label, page, stepDescription, stepStore
 
       if (isWaitTimeout && hasAction && isMeaningfulCode(code, stepDescription)) {
         stepStore.set(stepDescription, code);
-        logger.success(`${label}: candidate ${i + 1}/${candidates.length} worked (wait timeout ignored)`);
+        logger.success(`${attemptLabel} worked (wait timeout ignored) → ${formatLocatorForLog(code)}`);
         return { success: true, code, source: label.includes('LLM') ? 'llm' : 'library' };
       }
 
       lastError = summarizeExecError(err);
-      if (VERBOSE) {
-        logger.warning(`${label} ${i + 1}/${candidates.length} failed: ${lastError}`);
-      }
+      lastCode = code;
+      logger.warning(`${attemptLabel} failed: ${lastError}`);
     }
   }
 
-  logger.warning(`${label}: all ${candidates.length} failed — ${lastError}`);
+  if (lastCode) {
+    logger.warning(`${label}: all ${validCandidates.length} failed — last locator: ${formatLocatorForLog(lastCode)}`);
+  } else {
+    logger.warning(`${label}: all ${validCandidates.length} failed — ${lastError}`);
+  }
   return null;
 }
 
@@ -131,9 +175,12 @@ async function healStep(page, step, originalCode, errorMessage, runDir, execCode
         logger.info(`Healing [${roundLabel}] ${stepDescription} (action: ${actionType})`);
       }
 
-      const ELEMENT_FREE_ACTIONS = new Set(['navigate', 'hardWait']);
+      const ELEMENT_FREE_ACTIONS = new Set(['navigate', 'hardWait', 'clickOrdinalLink']);
       if (ELEMENT_FREE_ACTIONS.has(actionType)) {
         const fastCandidates = tryActionLibrary(stepDescription, []) || [];
+        if (fastCandidates.length > 0) {
+          logger.info(`Action library (${actionType}): ${fastCandidates.length} candidate(s) before page capture`);
+        }
         const fastResult = await tryCandidates(
           fastCandidates, 'Locator', page, stepDescription, stepStore, execCode
         );
@@ -185,12 +232,22 @@ async function healStep(page, step, originalCode, errorMessage, runDir, execCode
         .map((raw) => sanitizePlaywrightCode(typeof raw === 'string' ? raw : raw?.code || ''))
         .filter(Boolean);
 
-      if (codes.length === 0) continue;
+      if (codes.length === 0) {
+        logger.warning(`LLM [${roundLabel}]: no valid Playwright suggestions (response may be truncated — try a larger model)`);
+      } else {
+        const llmResult = await tryCandidates(
+          codes, 'LLM', page, stepDescription, stepStore, execCode
+        );
+        if (llmResult) return llmResult;
+      }
 
-      const llmResult = await tryCandidates(
-        codes, 'LLM', page, stepDescription, stepStore, execCode
-      );
-      if (llmResult) return llmResult;
+      const textFallbacks = buildTextClickFallback(stepDescription);
+      if (textFallbacks.length > 0) {
+        const fbResult = await tryCandidates(
+          textFallbacks, 'Text fallback', page, stepDescription, stepStore, execCode
+        );
+        if (fbResult) return fbResult;
+      }
     } catch (llmErr) {
       logger.error(`LLM error [${roundLabel}]: ${summarizeExecError(llmErr)}`);
     }
