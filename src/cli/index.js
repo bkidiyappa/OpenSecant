@@ -6,6 +6,7 @@ const path = require('path');
 const logger = require('../utils/logger');
 const { run } = require('./run');
 const { handleExploreCommands } = require('./explore');
+const { handleRecordCommand } = require('./record');
 const { initProject } = require('./init');
 const { printHealingStatus } = require('./heal');
 
@@ -25,6 +26,11 @@ async function main() {
   const reportsDir = path.join(__dirname, '..', '..', 'reports');
   if (!fs.existsSync(reportsDir)) {
     fs.mkdirSync(reportsDir, { recursive: true });
+  }
+
+  const recordExit = await handleRecordCommand(argv);
+  if (recordExit !== null) {
+    return recordExit;
   }
 
   const agentExit = await handleExploreCommands(argv);

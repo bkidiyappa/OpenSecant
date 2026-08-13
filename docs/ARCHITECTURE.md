@@ -97,6 +97,17 @@ Steps that normalize to exactly `PAUSE` are handled in `src/runner/stepExecutor.
 
 See [Writing tests — Interactive pause](WRITING_TESTS.md#interactive-pause--pause).
 
+## Recorder (browser overlay)
+
+`npx opensecant record <url>` launches a **headed** browser with an injected overlay (`src/engines/recorder/`):
+
+1. `exposeBinding('opensecantRecord')` + `addInitScript` inject UI and listeners
+2. User clicks/types → events with object snapshots bridge to Node
+3. `nlExporter` / `codeExporter` map events → Action Library phrases + Playwright
+4. On **Stop & Save**: `generateTestFile` + `stepStore.set` + session JSON under `reports/recorder/`
+
+See [Writing tests — Recorder](WRITING_TESTS.md#recorder-browser-overlay-ui).
+
 ## Step Resolution Order
 
 ```

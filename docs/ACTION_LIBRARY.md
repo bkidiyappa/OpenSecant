@@ -137,7 +137,19 @@ await page.getByTestId('country-select').selectOption('USA');
 await page.locator('#country').selectOption('USA');
 ```
 
-### 5. Wait Actions
+### 5. Keyboard press
+**Patterns:**
+- `Press Enter`
+- `Press Enter in <field>`
+- `Hit Escape` / `Press Tab` / `Press Space` / `Press Backspace`
+
+**Generated Code:**
+```javascript
+await page.keyboard.press('Enter');
+await page.getByPlaceholder('Search', { exact: false }).first().press('Enter');
+```
+
+### 6. Wait Actions
 **Patterns:**
 - `Wait for page to load`
 - `Wait for loading`

@@ -114,10 +114,52 @@ const ACTION_LIBRARY = {
     },
   },
 
+  pressKey: {
+    patterns: [
+      /^press (enter|escape|tab|space|backspace)(?:\s+(?:in|on|into)\s+(.+))?$/i,
+      /^hit (enter|escape|tab|space|backspace)(?:\s+(?:in|on|into)\s+(.+))?$/i,
+      /^press the (enter|escape|tab|space|backspace) key(?:\s+(?:in|on|into)\s+(.+))?$/i,
+    ],
+    generateCode: (match, elements) => {
+      const rawKey = (match[1] || 'Enter').toLowerCase();
+      const keyMap = {
+        enter: 'Enter',
+        escape: 'Escape',
+        tab: 'Tab',
+        space: ' ',
+        backspace: 'Backspace',
+      };
+      const key = keyMap[rawKey] || match[1];
+      const field = (match[2] || '').trim();
+
+      if (!field) {
+        return [`await page.keyboard.press(${JSON.stringify(key)});`];
+      }
+
+      const ranked = rankElementsForTarget(field, elements, 'fill', { minMatch: 0.35 });
+      const candidates = candidatesFromRanked(
+        ranked,
+        (loc) => `${loc}.first().press(${JSON.stringify(key)})`,
+        { maxCandidates: 8 },
+      );
+
+      if (candidates.length === 0) {
+        return [
+          `await page.getByLabel('${esc(field)}', { exact: false }).first().press(${JSON.stringify(key)});`,
+          `await page.getByPlaceholder('${esc(field)}', { exact: false }).first().press(${JSON.stringify(key)});`,
+          `await page.keyboard.press(${JSON.stringify(key)});`,
+        ];
+      }
+      return toCodeList(candidates);
+    },
+  },
+
   click: {
     patterns: [
       /^click (?:on |the )?(.+?)(?:\s+button)?$/i,
-      /^press (?:on |the )?(.+?)(?:\s+button)?$/i,
+      // Require "on"/"the" or trailing "button" so "Press Enter" is not treated as a click
+      /^press (?:on |the )(.+)$/i,
+      /^press (.+) button$/i,
       /^tap (?:on |the )?(.+?)(?:\s+button)?$/i,
     ],
     generateCode: (match, elements) => {

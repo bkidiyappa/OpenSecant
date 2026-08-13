@@ -14,16 +14,19 @@ const { paths: frameworkPaths } = require('../../config/frameworkConfig');
 const TESTS_DIR = path.join(frameworkPaths.tests, 'ai');
 
 /**
- * Generate a .test file from recorded agent steps.
+ * Generate a .test file from recorded agent/recorder steps.
  *
  * @param {string} testName - Name for the test (used as filename and title)
- * @param {Array} recordedSteps - Array of { step, code, success } from agent run
- * @param {Object} options - Optional: { tags, outputDir }
+ * @param {Array} recordedSteps - Array of { step, code, success } from agent/recorder run
+ * @param {Object} options - Optional: { tags, outputDir, dedupeSteps }
+ *   dedupeSteps — when true (default), keep only the first occurrence of each unique step
+ *                 (agent exploration). When false, keep every occurrence in order (recorder).
  * @returns {string} Path to the generated .test file
  */
 function generateTestFile(testName, recordedSteps, options = {}) {
   const tags = options.tags || ['@ai', '@agent-generated'];
   const outputDir = options.outputDir || TESTS_DIR;
+  const dedupeSteps = options.dedupeSteps !== false;
 
   // Sanitize test name for filename
   const safeName = testName
@@ -42,18 +45,23 @@ function generateTestFile(testName, recordedSteps, options = {}) {
     lines.push(tags.join(' '));
   }
 
-  // Steps — only include successful steps, deduplicated (keep first occurrence of each unique step)
-  const successfulSteps = recordedSteps.filter(s => s.success);
-  const seenSteps = new Set();
-  for (const { step } of successfulSteps) {
-    const normalized = step.toLowerCase().trim();
-    if (!seenSteps.has(normalized)) {
-      seenSteps.add(normalized);
+  const successfulSteps = recordedSteps.filter((s) => s.success);
+  if (dedupeSteps) {
+    const seenSteps = new Set();
+    for (const { step } of successfulSteps) {
+      const normalized = step.toLowerCase().trim();
+      if (!seenSteps.has(normalized)) {
+        seenSteps.add(normalized);
+        lines.push(step);
+      }
+    }
+  } else {
+    for (const { step } of successfulSteps) {
       lines.push(step);
     }
   }
 
-  const content = lines.join('\n') + '\n';
+  const content = `${lines.join('\n')}\n`;
 
   // Ensure output directory exists
   if (!fs.existsSync(outputDir)) {
@@ -61,7 +69,8 @@ function generateTestFile(testName, recordedSteps, options = {}) {
   }
 
   fs.writeFileSync(filePath, content, 'utf8');
-  logger.info(`[TestGenerator] Test file created: ${filePath} (${successfulSteps.length} steps)`);
+  const writtenCount = lines.length - (tags.length > 0 ? 1 : 0);
+  logger.info(`[TestGenerator] Test file created: ${filePath} (${writtenCount} steps${dedupeSteps ? ', deduped' : ''})`);
 
   return filePath;
 }

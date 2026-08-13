@@ -11,6 +11,7 @@ Write tests as plain English. OpenSecant resolves each step through a persistent
 - **Locator engine** — role/name, label, placeholder, test id priority (Playwright best practices)
 - **Self-healing** — retries with deterministic patterns, then LLM suggestions
 - **Interactive `PAUSE`** — halt a test in the browser until you press Enter in the terminal
+- **Recorder overlay** — `opensecant record <url>` captures actions + object info into `.test` files
 - **QA agent** — autonomous exploration and test generation from goals
 - **Multi-provider LLM** — Bedrock, OpenAI, Ollama, Azure OpenAI
 
@@ -87,6 +88,9 @@ npx opensecant --explore "https://example.com" --explore-name demo
 
 # Structured comprehensive QA (see examples/qa-agent/prompt.example.txt)
 npx opensecant --comprehensive-qa examples/qa-agent/promptExample.md
+
+# Record with in-page overlay UI
+npx opensecant record https://example.com --name smoke/demo
 ```
 
 ## Configuration
@@ -122,7 +126,7 @@ docs/           Architecture and guides
 ## Documentation
 
 - [System requirements](docs/SYSTEM_REQUIREMENTS.md) — Node, Playwright, GPU for local LLMs
-- [Writing tests](docs/WRITING_TESTS.md) — `@reuse`, `{{env.*}}`, utility keywords, **`PAUSE`**
+- [Writing tests](docs/WRITING_TESTS.md) — `@reuse`, `{{env.*}}`, utility keywords, **`PAUSE`**, **recorder**
 - [Architecture](docs/ARCHITECTURE.md)
 - [Action library patterns](docs/ACTION_LIBRARY.md)
 - [QA agent](docs/QA_AGENT.md)

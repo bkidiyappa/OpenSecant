@@ -175,7 +175,7 @@ async function healStep(page, step, originalCode, errorMessage, runDir, execCode
         logger.info(`Healing [${roundLabel}] ${stepDescription} (action: ${actionType})`);
       }
 
-      const ELEMENT_FREE_ACTIONS = new Set(['navigate', 'hardWait', 'clickOrdinalLink']);
+      const ELEMENT_FREE_ACTIONS = new Set(['navigate', 'hardWait', 'pressKey', 'clickOrdinalLink']);
       if (ELEMENT_FREE_ACTIONS.has(actionType)) {
         const fastCandidates = tryActionLibrary(stepDescription, []) || [];
         if (fastCandidates.length > 0) {

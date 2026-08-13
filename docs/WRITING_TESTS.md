@@ -258,6 +258,56 @@ Paused steps are recorded as **PASS** with the message: `Paused for manual inspe
 
 ---
 
+## Recorder (browser overlay UI)
+
+Capture clicks, fills, selects, and navigations while you use a headed browser. A floating **OpenSecant Recorder** panel (bottom-right) shows steps live.
+
+### Start a session
+
+```bash
+npx opensecant record https://www.google.com --name smoke/my-flow
+```
+
+| Flag | Meaning |
+|------|---------|
+| `--name <name>` | Test file base name. Use `smoke/foo` to write under `tests/smoke/foo.test` |
+| `--out <dir>` | Output folder under `tests/` (default: `tests/recorded`) |
+
+### Overlay controls
+
+| Control | Action |
+|---------|--------|
+| **Start** | Begin capturing (idle until you click this — avoids site auto-clicks on load) |
+| **Pause / Resume** | Temporarily ignore page interactions |
+| **Undo** | Drop the last captured step |
+| **Stop & Save** | Write `.test`, update stepstore, save session JSON |
+
+Synthetic / scripted clicks (`isTrusted === false`, e.g. FAQ auto-expand) are never recorded.
+
+You can also press **Ctrl+C** in the terminal to save and exit.
+
+### Output
+
+1. **`.test` file** — Action-Library-style English steps (`open …`, `Click on …`, `Fill … as …`)
+2. **`data/stepstore.json`** — NL → Playwright code for fast replay
+3. **`reports/recorder/*-session.json`** — full event + object info (attributes, position, values)
+
+Replay with:
+
+```bash
+npx opensecant smoke/my-flow
+```
+
+Repeated intentional actions on the same control are written **once per occurrence** in the `.test` file. Progressive typing is collapsed to a **single final Fill** per field; focus-clicks on inputs and click+check pairs are dropped. The stepstore still stores a single NL → Playwright mapping.
+
+### Object info captured per action
+
+Tag, role, text, label, `aria-label`, `data-testid`, `href`, name/id, value (for fills), keyboard keys (Enter), and bounding box — enough to rebuild locators without an LLM.
+
+**Keyboard:** Pressing **Enter** (including Numpad Enter) is recorded as `Press Enter` or `Press Enter in <field>` after any pending fill is flushed.
+
+---
+
 ## Runtime utilities (Playwright execution)
 
 When OpenSecant runs or generates Playwright code, these are available in the execution scope:

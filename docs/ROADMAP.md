@@ -16,7 +16,7 @@
 
 ## Future
 
+- [x] Recorder → natural-language step export (browser overlay UI — `opensecant record`)
 - [ ] Cloud step store sync for teams
-- [ ] Recorder → natural-language step export
 - [ ] Multi-browser matrix in parallel executor
 - [ ] Accessibility audit integration in QA agent reports

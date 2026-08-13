@@ -41,7 +41,10 @@ Agent modes:
   npx opensecant --explore "<url>" [--explore-name <n>] [--explore-max-pages <n>]
   npx opensecant --comprehensive-qa "<prompt-file>"
 
-See docs/QA_AGENT.md and docs/ARCHITECTURE.md for details.
+Recorder (in-page overlay UI):
+  npx opensecant record <url> [--name <test-name>] [--out <dir>]
+
+See docs/QA_AGENT.md, docs/WRITING_TESTS.md#recorder, and docs/ARCHITECTURE.md for details.
 `);
 }
 
